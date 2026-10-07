@@ -1,0 +1,530 @@
+<template>
+	<view>
+		<view class="topbar">
+			<view>
+				<text class="eyebrow">4月19日 · 星期六</text>
+				<text class="heading-1">早上好，保持节奏</text>
+			</view>
+			<button class="avatar">YC</button>
+		</view>
+
+		<view class="hero-card">
+			<view class="hero-decor"></view>
+			<view class="hero-copy">
+				<view class="hero-pill">
+					<gym-icon name="flame-mint" :size="15"></gym-icon>
+					<text class="hero-pill-text">连续训练 6 天</text>
+				</view>
+				<text class="hero-title">本周再练 <text class="hero-title-strong">1</text> 次，就完成目标</text>
+				<text class="hero-sub">你已经超过了 72% 的训练者</text>
+			</view>
+			<view class="progress-ring">
+				<image class="progress-ring-img" src="/static/charts/progress-ring.svg" mode="aspectFit"></image>
+				<view class="progress-ring-center">
+					<text class="progress-ring-value">3</text>
+					<text class="progress-ring-total">/ 4 次</text>
+				</view>
+			</view>
+		</view>
+
+		<view class="section-block">
+			<view class="section-heading">
+				<view>
+					<text class="section-kicker">APRIL 2025</text>
+					<text class="section-title">训练日历</text>
+				</view>
+				<view class="month-controls">
+					<button class="month-btn">‹</button>
+					<button class="month-btn">›</button>
+				</view>
+			</view>
+			<view class="calendar">
+				<text class="weekday" v-for="day in weekDays" :key="day">{{ day }}</text>
+				<view class="calendar-day" :class="{ muted: cell.muted, trained: cell.trained, today: cell.today }"
+					v-for="(cell, idx) in calendarCells" :key="idx">
+					<text>{{ cell.label }}</text>
+					<view class="calendar-dot" v-if="cell.trained"></view>
+				</view>
+			</view>
+			<view class="calendar-summary">
+				<view class="calendar-summary-left">
+					<view class="legend-dot"></view>
+					<text>本月已训练 9 天</text>
+				</view>
+				<text class="calendar-summary-strong">+28% <text class="calendar-summary-small">较上月</text></text>
+			</view>
+		</view>
+
+		<view class="section-block today-section">
+			<view class="section-heading">
+				<view>
+					<text class="section-kicker">TODAY</text>
+					<text class="section-title">今日训练</text>
+				</view>
+				<button class="text-button">
+					<text>查看计划</text>
+					<gym-icon name="chevron-muted" :size="15"></gym-icon>
+				</button>
+			</view>
+			<view class="workout-card">
+				<view class="workout-icon">
+					<gym-icon name="dumbbell-brand" :size="24"></gym-icon>
+				</view>
+				<view class="workout-info">
+					<view class="workout-info-top">
+						<text class="workout-title">推力训练</text>
+						<text class="status-tag">计划中</text>
+					</view>
+					<text class="workout-sub">胸部 · 肩部 · 三头肌</text>
+					<view class="meta-row">
+						<view class="meta-item">
+							<gym-icon name="clock-muted" :size="15"></gym-icon>
+							<text>约 55 分钟</text>
+						</view>
+						<view class="meta-item">
+							<gym-icon name="dumbbell-muted" :size="15"></gym-icon>
+							<text>6 个动作</text>
+						</view>
+					</view>
+				</view>
+				<button class="round-arrow">
+					<gym-icon name="chevron-muted" :size="18"></gym-icon>
+				</button>
+			</view>
+		</view>
+
+		<button class="start-button" @click="onStart">
+			<view class="start-button-icon">
+				<gym-icon name="plus-white" :size="22"></gym-icon>
+			</view>
+			<text>开始今日训练</text>
+		</button>
+	</view>
+</template>
+
+<script setup lang="uts">
+	type CalendarCell = {
+		label : number
+		muted : boolean
+		trained : boolean
+		today : boolean
+	}
+
+	const emit = defineEmits(['start'])
+
+	function onStart() {
+		emit('start')
+	}
+
+	const weekDays = ref<string[]>(['一', '二', '三', '四', '五', '六', '日'])
+
+	function buildCalendar() : CalendarCell[] {
+		const trainedDays : number[] = [1, 3, 5, 8, 10, 12, 15, 17, 19]
+		const cells : CalendarCell[] = []
+		for (let i = 0; i < 35; i++) {
+			const day = i - 2
+			const valid = day > 0 && day <= 30
+			let label : number = day
+			if (!valid) {
+				label = day <= 0 ? 31 + day : day - 30
+			}
+			cells.push({
+				label: label,
+				muted: !valid,
+				trained: trainedDays.includes(day),
+				today: day == 19
+			} as CalendarCell)
+		}
+		return cells
+	}
+
+	const calendarCells = ref<CalendarCell[]>(buildCalendar())
+</script>
+
+<style lang="scss">
+	.topbar {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 34px 2px 24px;
+	}
+
+	.eyebrow,
+	.section-kicker {
+		margin-bottom: 6px;
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.heading-1 {
+		font-size: 25px;
+		line-height: 1.25;
+	}
+
+	.avatar {
+		width: 43px;
+		height: 43px;
+		border-width: 0;
+		border-radius: 50%;
+		color: #f5fff9;
+		background-color: #1d3328;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.hero-card {
+		position: relative;
+		display: flex;
+		flex-direction: row;
+		min-height: 184px;
+		padding: 23px;
+		border-radius: 25px;
+		background-color: #1f4433;
+		overflow: hidden;
+	}
+
+	.hero-decor {
+		position: absolute;
+		width: 200px;
+		height: 200px;
+		right: -100px;
+		top: -115px;
+		border-width: 36px;
+		border-color: #ffffff1a;
+		border-style: solid;
+		border-radius: 100px;
+	}
+
+	.hero-copy {
+		position: relative;
+		flex: 1;
+	}
+
+	.hero-pill {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		align-self: flex-start;
+		padding: 6px 9px;
+		border-radius: 10px;
+		background-color: #ffffff20;
+	}
+
+	.hero-pill-text {
+		margin-left: 5px;
+		color: #c9f6df;
+		font-size: 11px;
+		font-weight: 600;
+	}
+
+	.hero-title {
+		margin-top: 17px;
+		color: #ffffff;
+		font-size: 22px;
+		line-height: 1.4;
+		font-weight: 500;
+	}
+
+	.hero-title-strong {
+		color: #70e6ad;
+		font-size: 26px;
+	}
+
+	.hero-sub {
+		margin-top: 8px;
+		color: #bdd3c8;
+		font-size: 11px;
+	}
+
+	.progress-ring {
+		position: relative;
+		width: 112px;
+		height: 112px;
+		margin-left: 5px;
+	}
+
+	.progress-ring-img {
+		width: 112px;
+		height: 112px;
+	}
+
+	.progress-ring-center {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.progress-ring-value {
+		color: #ffffff;
+		font-size: 30px;
+	}
+
+	.progress-ring-total {
+		margin-top: 4px;
+		color: #afc9bc;
+		font-size: 10px;
+	}
+
+	.section-block {
+		margin-top: 28px;
+		padding: 20px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e9edea;
+		border-radius: 22px;
+		background-color: #ffffff;
+	}
+
+	.section-heading {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 17px;
+	}
+
+	.section-title {
+		font-size: 18px;
+	}
+
+	.month-controls {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.month-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 29px;
+		height: 29px;
+		margin-left: 5px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e4e9e5;
+		border-radius: 9px;
+		background-color: #fafbfa;
+		font-size: 20px;
+	}
+
+	.calendar {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+
+	.weekday {
+		width: 14.28%;
+		padding-bottom: 7px;
+		color: #a0aaa4;
+		font-size: 10px;
+		text-align: center;
+	}
+
+	.calendar-day {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 14.28%;
+		height: 34px;
+		border-radius: 17px;
+		color: #4a5650;
+		font-size: 12px;
+	}
+
+	.calendar-day.muted {
+		color: #c9cecb;
+	}
+
+	.calendar-day.trained {
+		color: #176444;
+		background-color: #e4f8ed;
+		font-weight: 700;
+	}
+
+	.calendar-day.today {
+		color: #ffffff;
+		background-color: #1db776;
+	}
+
+	.calendar-dot {
+		position: absolute;
+		bottom: 2px;
+		width: 3px;
+		height: 3px;
+		border-radius: 2px;
+		background-color: currentColor;
+	}
+
+	.calendar-summary {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-top: 16px;
+		padding-top: 14px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #eef1ef;
+		color: #6e7973;
+		font-size: 11px;
+	}
+
+	.calendar-summary-left {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.legend-dot {
+		width: 7px;
+		height: 7px;
+		margin-right: 6px;
+		border-radius: 4px;
+		background-color: #2cc385;
+	}
+
+	.calendar-summary-strong {
+		color: #159a62;
+	}
+
+	.calendar-summary-small {
+		color: #99a19d;
+		font-weight: 400;
+	}
+
+	.today-section {
+		padding: 20px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e8ece9;
+		background-color: transparent;
+	}
+
+	.text-button {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		border-width: 0;
+		background-color: transparent;
+		color: #6d7872;
+		font-size: 11px;
+	}
+
+	.workout-card {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 16px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e8ece9;
+		border-radius: 18px;
+		background-color: #ffffff;
+	}
+
+	.workout-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 47px;
+		height: 55px;
+		margin-right: 13px;
+		border-radius: 14px;
+		background-color: #e8f8f0;
+	}
+
+	.workout-info {
+		flex: 1;
+	}
+
+	.workout-info-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.workout-title {
+		font-size: 15px;
+	}
+
+	.status-tag {
+		margin-left: 8px;
+		padding: 3px 6px;
+		border-radius: 5px;
+		color: #318463;
+		background-color: #edf8f3;
+		font-size: 8px;
+	}
+
+	.workout-sub {
+		display: block;
+		margin: 4px 0 8px;
+		color: #89928d;
+		font-size: 10px;
+	}
+
+	.meta-row {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.meta-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-right: 12px;
+		color: #77827c;
+		font-size: 9px;
+	}
+
+	.round-arrow {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 29px;
+		height: 29px;
+		margin-left: 13px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e4e9e5;
+		border-radius: 9px;
+		background-color: #fafbfa;
+	}
+
+	.start-button {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		height: 56px;
+		margin-top: 28px;
+		margin-bottom: 110px;
+		border-width: 0;
+		border-radius: 18px;
+		color: #ffffff;
+		background-color: #1cba78;
+		font-weight: 700;
+	}
+
+	.start-button-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 29px;
+		height: 29px;
+		margin-right: 11px;
+		border-radius: 9px;
+		background-color: #ffffff33;
+	}
+</style>

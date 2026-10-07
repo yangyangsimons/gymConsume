@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 294 100" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#23d18b" stop-opacity=".22" />
+      <stop offset="1" stop-color="#23d18b" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <path d="M0,82 42,72 84,78 126,52 168,57 210,30 252,39 294,12 L294,100 L0,100 Z" fill="url(#fill)" />
+  <polyline points="0,82 42,72 84,78 126,52 168,57 210,30 252,39 294,12" fill="none" stroke="#17b978" stroke-width="3" />
+  <circle cx="294" cy="12" r="5" fill="#fff" stroke="#17b978" stroke-width="3" />
+</svg>

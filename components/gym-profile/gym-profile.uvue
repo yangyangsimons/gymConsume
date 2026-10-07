@@ -1,0 +1,275 @@
+<template>
+	<view>
+		<view class="page-header">
+			<text class="eyebrow">账户与偏好</text>
+			<text class="heading-1">我的</text>
+		</view>
+
+		<view class="profile-card">
+			<view class="profile-avatar">YC</view>
+			<view class="profile-info">
+				<text class="profile-name">Yuchen</text>
+				<text class="profile-sub">坚持训练的第 128 天</text>
+			</view>
+			<button class="profile-edit">
+				<gym-icon name="chevron-on-dark" :size="18"></gym-icon>
+			</button>
+		</view>
+
+		<text class="settings-label">基础设置</text>
+		<view class="settings-group">
+			<view class="setting-row">
+				<view class="setting-icon">
+					<gym-icon name="scale-brand" :size="20"></gym-icon>
+				</view>
+				<view class="setting-copy">
+					<text class="setting-title">重量单位</text>
+					<text class="setting-sub">训练记录使用的单位</text>
+				</view>
+				<view class="unit-switch">
+					<button class="unit-btn" :class="{ active: unit === 'kg' }" @click="unit = 'kg'">kg</button>
+					<button class="unit-btn" :class="{ active: unit === 'lbs' }" @click="unit = 'lbs'">lbs</button>
+				</view>
+			</view>
+			<view class="setting-row no-border">
+				<view class="setting-icon">
+					<gym-icon name="moon-brand" :size="20"></gym-icon>
+				</view>
+				<view class="setting-copy">
+					<text class="setting-title">深色模式</text>
+					<text class="setting-sub">跟随你的使用习惯</text>
+				</view>
+				<button class="toggle" :class="{ on: dark }" @click="dark = !dark">
+					<view class="toggle-knob"></view>
+				</button>
+			</view>
+		</view>
+
+		<text class="settings-label">训练与数据</text>
+		<view class="settings-group">
+			<button class="setting-row action">
+				<view class="setting-icon">
+					<gym-icon name="dumbbell-brand" :size="20"></gym-icon>
+				</view>
+				<view class="setting-copy">
+					<text class="setting-title">动作库管理</text>
+					<text class="setting-sub">32 个动作 · 3 个自定义</text>
+				</view>
+				<gym-icon name="chevron-muted-light" :size="18"></gym-icon>
+			</button>
+			<button class="setting-row action">
+				<view class="setting-icon">
+					<gym-icon name="chart-brand" :size="20"></gym-icon>
+				</view>
+				<view class="setting-copy">
+					<text class="setting-title">身体数据</text>
+					<text class="setting-sub">体重、体脂率与围度</text>
+				</view>
+				<gym-icon name="chevron-muted-light" :size="18"></gym-icon>
+			</button>
+			<button class="setting-row action no-border">
+				<view class="setting-icon">
+					<gym-icon name="download-brand" :size="20"></gym-icon>
+				</view>
+				<view class="setting-copy">
+					<text class="setting-title">导出训练日志</text>
+					<text class="setting-sub">导出为 Excel 文件</text>
+				</view>
+				<gym-icon name="chevron-muted-light" :size="18"></gym-icon>
+			</button>
+		</view>
+
+		<button class="danger-button">清空全部数据</button>
+	</view>
+</template>
+
+<script setup lang="uts">
+	const dark = ref(false)
+	const unit = ref('kg')
+</script>
+
+<style lang="scss">
+	.page-header {
+		padding: 34px 2px 22px;
+	}
+
+	.eyebrow {
+		display: block;
+		margin-bottom: 6px;
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.heading-1 {
+		font-size: 25px;
+	}
+
+	.profile-card {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 19px;
+		border-radius: 21px;
+		background-color: #1d3a2e;
+	}
+
+	.profile-avatar {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 55px;
+		height: 55px;
+		margin-right: 13px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #ffffff3d;
+		border-radius: 17px;
+		background-color: #ffffff24;
+		color: #ffffff;
+		font-weight: 700;
+	}
+
+	.profile-info {
+		flex: 1;
+	}
+
+	.profile-name {
+		display: block;
+		margin-bottom: 4px;
+		color: #ffffff;
+		font-size: 18px;
+	}
+
+	.profile-sub {
+		color: #bad2c6;
+		font-size: 10px;
+	}
+
+	.profile-edit {
+		border-width: 0;
+		background-color: transparent;
+		color: #b8cec3;
+	}
+
+	.settings-label {
+		display: block;
+		margin: 25px 3px 9px;
+		color: #8b958f;
+		font-size: 10px;
+		font-weight: 700;
+	}
+
+	.settings-group {
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 19px;
+		background-color: #ffffff;
+		overflow: hidden;
+	}
+
+	.setting-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		width: 100%;
+		min-height: 68px;
+		padding: 12px 15px;
+		border-width: 0;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #edf0ee;
+		background-color: #ffffff;
+	}
+
+	.setting-row.no-border {
+		border-bottom-width: 0;
+	}
+
+	.setting-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 38px;
+		height: 38px;
+		margin-right: 12px;
+		border-radius: 11px;
+		background-color: #ebf7f1;
+	}
+
+	.setting-copy {
+		flex: 1;
+	}
+
+	.setting-title {
+		display: block;
+		margin-bottom: 4px;
+		font-size: 12px;
+	}
+
+	.setting-sub {
+		color: #98a19c;
+		font-size: 9px;
+	}
+
+	.unit-switch {
+		display: flex;
+		flex-direction: row;
+		padding: 3px;
+		border-radius: 9px;
+		background-color: #f1f4f2;
+	}
+
+	.unit-btn {
+		padding: 5px 8px;
+		border-width: 0;
+		border-radius: 7px;
+		background-color: transparent;
+		color: #929b96;
+		font-size: 9px;
+	}
+
+	.unit-btn.active {
+		color: #247953;
+		background-color: #ffffff;
+	}
+
+	.toggle {
+		width: 41px;
+		height: 24px;
+		padding: 3px;
+		border-width: 0;
+		border-radius: 20px;
+		background-color: #dce2de;
+	}
+
+	.toggle.on {
+		background-color: #22b979;
+	}
+
+	.toggle-knob {
+		width: 18px;
+		height: 18px;
+		border-radius: 9px;
+		background-color: #ffffff;
+	}
+
+	.toggle.on .toggle-knob {
+		margin-left: 17px;
+	}
+
+	.danger-button {
+		width: 100%;
+		margin-top: 24px;
+		margin-bottom: 40px;
+		padding: 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #f0d8d8;
+		border-radius: 14px;
+		color: #c55c5c;
+		background-color: #fff9f9;
+		font-size: 11px;
+	}
+</style>

@@ -1,0 +1,8 @@
+{
+  "chat.tools.terminal.autoApprove": {
+    "/^Get-ChildItem -Force \\| Select Name; Get-Content static\\\\icons\\\\home-brand\\.svg; Get-Content static\\\\icons\\\\home-muted-light\\.svg; Get-Content App\\.uvue; \\(Get-Content components\\\\gym-workout-sheet\\\\gym-workout-sheet\\.uvue \\| Select -First 40\\); python -c \"import PIL;print\\('pil'\\)\"; python -c \"import cairosvg;print\\('cairo'\\)\"$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  }
+}

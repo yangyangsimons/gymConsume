@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 115 115">
+  <g transform="rotate(-90 57.5 57.5)">
+    <circle cx="57.5" cy="57.5" r="47.25" fill="none" stroke="#26bd7c" stroke-width="20.5" stroke-dasharray="83.13 213.75" stroke-dashoffset="0.00" />
+    <circle cx="57.5" cy="57.5" r="47.25" fill="none" stroke="#5a91e3" stroke-width="20.5" stroke-dasharray="71.25 225.63" stroke-dashoffset="-83.13" />
+    <circle cx="57.5" cy="57.5" r="47.25" fill="none" stroke="#e4a85b" stroke-width="20.5" stroke-dasharray="62.34 234.54" stroke-dashoffset="-154.38" />
+    <circle cx="57.5" cy="57.5" r="47.25" fill="none" stroke="#d9dfdb" stroke-width="20.5" stroke-dasharray="80.16 216.72" stroke-dashoffset="-216.72" />
+  </g>
+  <circle cx="57.5" cy="57.5" r="37" fill="#ffffff" />
+</svg>

@@ -1,0 +1,25 @@
+<template>
+	<view class="app-shell">
+		<scroll-view class="app-content" scroll-y="true">
+			<gym-dashboard @start="openWorkout"></gym-dashboard>
+		</scroll-view>
+
+		<gym-workout-sheet v-if="workoutOpen" @close="closeWorkout"></gym-workout-sheet>
+	</view>
+</template>
+
+<script setup lang="uts">
+	const workoutOpen = ref(false)
+
+	function openWorkout() {
+		workoutOpen.value = true
+	}
+
+	function closeWorkout() {
+		workoutOpen.value = false
+	}
+</script>
+
+<style lang="scss">
+	@import "@/styles/page-layout.scss";
+</style>

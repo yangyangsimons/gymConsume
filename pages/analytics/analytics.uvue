@@ -1,0 +1,14 @@
+<template>
+	<view class="app-shell">
+		<scroll-view class="app-content" scroll-y="true">
+			<gym-analytics></gym-analytics>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+</script>
+
+<style lang="scss">
+	@import "@/styles/page-layout.scss";
+</style>

@@ -1,0 +1,23 @@
+<template>
+	<image class="gym-icon" :src="src" :style="{ width: size + 'px', height: size + 'px' }" mode="aspectFit"></image>
+</template>
+
+<script setup lang="uts">
+	// 小程序端不支持原生 <svg>/<path> 标签，也无法像 Web 端那样用 currentColor 动态换色，
+	// 所以每个图标按实际用到的颜色预先生成好了静态 svg 文件（见 scripts/gen_icons.js），
+	// 这里只需要按 "图标名-颜色" 拼出对应资源路径即可。
+	const { name = 'chevron-muted', size = 20 } = defineProps<{
+		name ?: string
+		size ?: number
+	}>()
+
+	const src = computed((): string => {
+		return '/static/icons/' + name + '.svg'
+	})
+</script>
+
+<style>
+	.gym-icon {
+		flex-shrink: 0;
+	}
+</style>

@@ -1,0 +1,416 @@
+<template>
+	<view>
+		<view class="page-header">
+			<text class="eyebrow">你的训练表现</text>
+			<text class="heading-1">数据统计</text>
+		</view>
+
+		<view class="stat-grid">
+			<view class="stat-card">
+				<text class="stat-label">总训练</text>
+				<text class="stat-value">48<text class="stat-unit"> 次</text></text>
+				<text class="stat-meta">近 90 天</text>
+			</view>
+			<view class="stat-card">
+				<text class="stat-label">训练容量</text>
+				<text class="stat-value">126<text class="stat-unit"> 吨</text></text>
+				<text class="stat-meta positive">↑ 12.6%</text>
+			</view>
+			<view class="stat-card">
+				<text class="stat-label">训练时长</text>
+				<text class="stat-value">42<text class="stat-unit"> h</text></text>
+				<text class="stat-meta">平均 52 分钟</text>
+			</view>
+		</view>
+
+		<view class="section-block analytics-card">
+			<view class="section-heading">
+				<view>
+					<text class="section-kicker">CONSISTENCY</text>
+					<text class="section-title">训练频率</text>
+				</view>
+				<picker mode="selector" :range="periods" :value="periodIndex" @change="onPeriodChange">
+					<view class="period-select">{{ periods[periodIndex] }}</view>
+				</picker>
+			</view>
+			<view class="heatmap">
+				<view class="heat-cell" :class="'heat-' + value" v-for="(value, idx) in heatValues" :key="idx"></view>
+			</view>
+			<view class="heatmap-labels">
+				<text class="heatmap-month">2月</text>
+				<text class="heatmap-month">3月</text>
+				<text class="heatmap-month">4月</text>
+				<view class="heatmap-legend">
+					<text>少</text>
+					<view class="heat-cell heat-1"></view>
+					<view class="heat-cell heat-3"></view>
+					<text>多</text>
+				</view>
+			</view>
+		</view>
+
+		<view class="section-block analytics-card">
+			<view class="section-heading">
+				<view>
+					<text class="section-kicker">STRENGTH</text>
+					<text class="section-title">卧推趋势</text>
+				</view>
+				<text class="pr-chip">PR 82.5 kg</text>
+			</view>
+			<view class="chart-value">
+				<text class="chart-value-strong">2,480</text>
+				<text class="chart-value-unit">kg 总容量</text>
+			</view>
+			<image class="line-chart" src="/static/charts/line-chart.svg" mode="widthFix"></image>
+			<view class="chart-labels">
+				<text>1月</text>
+				<text>2月</text>
+				<text>3月</text>
+				<text>4月</text>
+			</view>
+		</view>
+
+		<view class="section-block analytics-card">
+			<view class="section-heading">
+				<view>
+					<text class="section-kicker">BALANCE</text>
+					<text class="section-title">部位分布</text>
+				</view>
+			</view>
+			<view class="distribution-content">
+				<view class="donut">
+					<image class="donut-img" src="/static/charts/donut.svg" mode="aspectFit"></image>
+					<view class="donut-center">
+						<text class="donut-value">36</text>
+						<text class="donut-label">总组数</text>
+					</view>
+				</view>
+				<view class="muscle-list">
+					<view class="muscle-row">
+						<view class="muscle-dot green"></view>
+						<text class="muscle-name">胸部</text>
+						<text class="muscle-value">28%</text>
+					</view>
+					<view class="muscle-row">
+						<view class="muscle-dot blue"></view>
+						<text class="muscle-name">背部</text>
+						<text class="muscle-value">24%</text>
+					</view>
+					<view class="muscle-row">
+						<view class="muscle-dot orange"></view>
+						<text class="muscle-name">腿部</text>
+						<text class="muscle-value">21%</text>
+					</view>
+					<view class="muscle-row">
+						<view class="muscle-dot gray"></view>
+						<text class="muscle-name">其他</text>
+						<text class="muscle-value">27%</text>
+					</view>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	const heatValues = ref<number[]>([
+		0, 1, 0, 2, 0, 0, 1, 1, 2, 0, 0, 1, 3, 0, 0, 2, 3, 1, 0, 0, 1, 2, 3, 0, 2, 1, 4, 0,
+		1, 2, 0, 4, 2, 1, 0, 0, 3, 2, 1, 3, 0, 2, 1, 4, 3, 2, 0, 1, 3, 2, 3, 1, 4, 2, 3, 0,
+		1, 2, 4, 3, 2, 1, 0, 0, 3, 2, 4, 3, 2, 1, 2, 4, 3, 1, 2, 3, 0
+	])
+
+	const periods = ref<string[]>(['近 12 周', '近一年'])
+	const periodIndex = ref(0)
+
+	type PickerChangeEventDetail = {
+		value : string
+	}
+	type PickerChangeEvent = {
+		detail : PickerChangeEventDetail
+	}
+
+	function onPeriodChange(e : PickerChangeEvent) {
+		periodIndex.value = parseInt(e.detail.value)
+	}
+</script>
+
+<style lang="scss">
+	.page-header {
+		padding: 34px 2px 22px;
+	}
+
+	.eyebrow {
+		display: block;
+		margin-bottom: 6px;
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.heading-1 {
+		font-size: 25px;
+	}
+
+	.stat-grid {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.stat-card {
+		flex: 1;
+		margin-right: 9px;
+		padding: 15px 12px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 17px;
+		background-color: #ffffff;
+	}
+
+	.stat-label {
+		display: block;
+		color: #89938d;
+		font-size: 9px;
+	}
+
+	.stat-value {
+		display: block;
+		margin: 6px 0 3px;
+		font-size: 21px;
+	}
+
+	.stat-unit {
+		font-size: 10px;
+		font-weight: 500;
+	}
+
+	.stat-meta {
+		display: block;
+		color: #9ca49f;
+		font-size: 8px;
+	}
+
+	.stat-meta.positive {
+		color: #17a669;
+	}
+
+	.analytics-card {
+		margin-top: 14px;
+		padding: 20px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e9edea;
+		border-radius: 22px;
+		background-color: #ffffff;
+	}
+
+	.section-heading {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 17px;
+	}
+
+	.section-kicker {
+		display: block;
+		margin-bottom: 6px;
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.section-title {
+		font-size: 18px;
+	}
+
+	.period-select {
+		padding: 7px 9px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e2e7e4;
+		border-radius: 9px;
+		color: #69746e;
+		background-color: #ffffff;
+		font-size: 10px;
+	}
+
+	.heatmap {
+		display: flex;
+		flex-direction: column;
+		flex-wrap: wrap;
+		height: 87px;
+	}
+
+	.heat-cell {
+		width: 9px;
+		height: 9px;
+		margin-right: 4px;
+		margin-bottom: 4px;
+		border-radius: 2px;
+		background-color: #edf1ee;
+	}
+
+	.heat-1 {
+		background-color: #c8efdc;
+	}
+
+	.heat-2 {
+		background-color: #7ed5ac;
+	}
+
+	.heat-3 {
+		background-color: #38b97d;
+	}
+
+	.heat-4 {
+		background-color: #168d59;
+	}
+
+	.heatmap-labels {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 10px;
+		color: #a0a8a3;
+		font-size: 8px;
+	}
+
+	.heatmap-month {
+		margin-right: 58px;
+	}
+
+	.heatmap-legend {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-left: auto;
+	}
+
+	.heatmap-legend .heat-cell {
+		margin: 0 4px;
+	}
+
+	.pr-chip {
+		padding: 6px 9px;
+		border-radius: 8px;
+		color: #168c59;
+		background-color: #e8f8f0;
+		font-size: 9px;
+		font-weight: 700;
+	}
+
+	.chart-value {
+		display: flex;
+		flex-direction: row;
+		align-items: baseline;
+	}
+
+	.chart-value-strong {
+		margin-right: 7px;
+		font-size: 24px;
+	}
+
+	.chart-value-unit {
+		color: #939c97;
+		font-size: 9px;
+	}
+
+	.line-chart {
+		width: 100%;
+		height: 108px;
+		margin-top: 3px;
+	}
+
+	.chart-labels {
+		display: flex;
+		flex-direction: row;
+		justify-content: space-between;
+		color: #9ca59f;
+		font-size: 8px;
+	}
+
+	.distribution-content {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-around;
+	}
+
+	.donut {
+		position: relative;
+		width: 115px;
+		height: 115px;
+	}
+
+	.donut-img {
+		width: 115px;
+		height: 115px;
+	}
+
+	.donut-center {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.donut-value {
+		font-size: 21px;
+	}
+
+	.donut-label {
+		margin-top: 2px;
+		color: #8a948e;
+		font-size: 8px;
+	}
+
+	.muscle-list {
+		width: 130px;
+	}
+
+	.muscle-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin: 8px 0;
+		color: #76817b;
+		font-size: 10px;
+	}
+
+	.muscle-dot {
+		width: 7px;
+		height: 7px;
+		margin-right: 7px;
+		border-radius: 4px;
+	}
+
+	.muscle-name {
+		flex: 1;
+	}
+
+	.muscle-value {
+		color: #354139;
+	}
+
+	.green {
+		background-color: #26bd7c;
+	}
+
+	.blue {
+		background-color: #5a91e3;
+	}
+
+	.orange {
+		background-color: #e4a85b;
+	}
+
+	.gray {
+		background-color: #d9dfdb;
+	}
+</style>

@@ -1,0 +1,19 @@
+// 页面通用布局：tab 页面的外层容器与滚动区域，修改此处即可同步所有页面
+@import "@/uni.scss";
+
+.app-shell {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	font-family: $gym-font-family;
+	padding-top: env(safe-area-inset-top);
+	background-color: $gym-bg-page;
+	box-sizing: border-box;
+}
+
+.app-content {
+	width: 100%;
+	height: 100%;
+	padding: 0 $gym-page-gutter $gym-page-gutter;
+	box-sizing: border-box;
+}

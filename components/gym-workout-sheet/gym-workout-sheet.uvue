@@ -1,0 +1,571 @@
+<template>
+	<view class="sheet-backdrop" @click="onBackdropClick">
+		<view class="workout-sheet" @click.stop="noop">
+			<view class="sheet-handle"></view>
+			<view class="sheet-header">
+				<view>
+					<text class="section-kicker">{{ step === 'select' ? 'NEW WORKOUT' : 'PUSH DAY' }}</text>
+					<text class="sheet-title">{{ step === 'select' ? '添加训练动作' : '杠铃卧推' }}</text>
+				</view>
+				<button class="close-button" @click="onClose">
+					<gym-icon name="close-muted" :size="18"></gym-icon>
+				</button>
+			</view>
+
+			<view class="step-select" v-if="step === 'select'">
+				<view class="search-box">
+					<gym-icon name="search-muted-light" :size="19"></gym-icon>
+					<input class="search-input" placeholder="搜索动作名称或拼音" />
+				</view>
+				<scroll-view class="category-tabs" scroll-x="true">
+					<button class="category-btn" :class="{ active: category === item }" v-for="item in categories"
+						:key="item" @click="category = item">{{ item }}</button>
+				</scroll-view>
+				<view class="exercise-list">
+					<button class="exercise-item" :class="{ 'no-border': idx === exercises.length - 1 }"
+						v-for="(exercise, idx) in exercises" :key="exercise.name" @click="step = 'entry'">
+						<view class="exercise-thumb" :class="'thumb-' + idx">{{ exercise.icon }}</view>
+						<view class="exercise-copy">
+							<text class="exercise-name">{{ exercise.name }}</text>
+							<text class="exercise-sub">{{ exercise.sub }}</text>
+						</view>
+						<text class="exercise-tag" v-if="idx === 0">常用</text>
+						<gym-icon name="chevron-muted-light" :size="18"></gym-icon>
+					</button>
+				</view>
+				<button class="custom-exercise">
+					<gym-icon name="plus-brand" :size="18"></gym-icon>
+					<text>创建自定义动作</text>
+				</button>
+			</view>
+			<view class="step-entry" v-else>
+				<view class="exercise-summary">
+					<view class="exercise-illustration">
+						<gym-icon name="dumbbell-brand" :size="36"></gym-icon>
+					</view>
+					<view class="exercise-summary-copy">
+						<text class="exercise-summary-sub">胸大肌 · 三头肌</text>
+						<text class="exercise-summary-strong">历史最佳 80 kg × 5</text>
+					</view>
+					<button class="exercise-summary-btn">动作说明</button>
+				</view>
+				<view class="sets-header">
+					<text class="col-number">组</text>
+					<text class="col-last">上次</text>
+					<text class="col-weight">重量 kg</text>
+					<text class="col-reps">次数</text>
+					<text class="col-check"></text>
+				</view>
+				<view class="sets-list">
+					<view class="set-row" :class="{ completed: set.done }" v-for="(set, i) in sets" :key="i">
+						<text class="set-number">{{ i + 1 }}</text>
+						<text class="last-set">{{ lastSetLabel(i) }}</text>
+						<input class="set-input" type="digit" :value="set.weight" placeholder="0"
+							@input="onWeightInput(i, $event)" />
+						<input class="set-input" type="number" :value="set.reps" placeholder="0"
+							@input="onRepsInput(i, $event)" />
+						<button class="set-check" @click="toggleSet(i)">
+							<gym-icon name="check-white" :size="18" v-if="set.done"></gym-icon>
+						</button>
+					</view>
+				</view>
+				<button class="add-set" @click="addSet">
+					<gym-icon name="plus-brand" :size="18"></gym-icon>
+					<text>添加一组</text>
+				</button>
+				<view class="rest-row">
+					<view class="rest-label">
+						<gym-icon name="clock-muted" :size="18"></gym-icon>
+						<text>组间休息</text>
+					</view>
+					<text class="rest-value">01:30</text>
+					<button class="rest-btn">开始计时</button>
+				</view>
+				<button class="save-workout" @click="onClose">完成并保存</button>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	type WorkoutSet = {
+		weight : string
+		reps : string
+		done : boolean
+	}
+
+	type Exercise = {
+		name : string
+		sub : string
+		icon : string
+	}
+
+	type InputEventDetail = {
+		value : string
+	}
+	type InputEvent = {
+		detail : InputEventDetail
+	}
+
+	const emit = defineEmits(['close'])
+
+	const step = ref<string>('select')
+	const category = ref<string>('胸')
+	const categories = ref<string[]>(['胸', '背', '腿', '肩', '手臂', '核心'])
+
+	const exercises = ref<Exercise[]>([
+		{ name: '杠铃卧推', sub: '胸大肌 · 三头肌', icon: '卧' } as Exercise,
+		{ name: '上斜哑铃卧推', sub: '上胸 · 三角肌前束', icon: '斜' } as Exercise,
+		{ name: '绳索夹胸', sub: '胸大肌', icon: '夹' } as Exercise,
+		{ name: '双杠臂屈伸', sub: '下胸 · 三头肌', icon: '屈' } as Exercise
+	])
+
+	const sets = ref<WorkoutSet[]>([
+		{ weight: '60', reps: '10', done: true } as WorkoutSet,
+		{ weight: '65', reps: '8', done: false } as WorkoutSet,
+		{ weight: '', reps: '', done: false } as WorkoutSet
+	])
+
+	function lastSetLabel(i : number) : string {
+		if (i == 0) return '57.5 × 10'
+		if (i == 1) return '62.5 × 8'
+		return '—'
+	}
+
+	function updateSet(index : number, key : string, value : string) {
+		const set = sets.value[index]
+		if (key == 'weight') {
+			set.weight = value
+		} else {
+			set.reps = value
+		}
+	}
+
+	function onWeightInput(index : number, e : InputEvent) {
+		updateSet(index, 'weight', e.detail.value)
+	}
+
+	function onRepsInput(index : number, e : InputEvent) {
+		updateSet(index, 'reps', e.detail.value)
+	}
+
+	function toggleSet(index : number) {
+		sets.value[index].done = !sets.value[index].done
+	}
+
+	function addSet() {
+		sets.value.push({ weight: '', reps: '', done: false } as WorkoutSet)
+	}
+
+	function onClose() {
+		emit('close')
+	}
+
+	function onBackdropClick() {
+		emit('close')
+	}
+
+	function noop() {
+		// 阻止点击弹层内容时冒泡到背景层
+	}
+</script>
+
+<style lang="scss">
+	.sheet-backdrop {
+		position: fixed;
+		z-index: 20;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		display: flex;
+		align-items: flex-end;
+		background-color: #13251ccc;
+	}
+
+	.workout-sheet {
+		width: 100%;
+		max-height: 92%;
+		padding: 9px 22px 28px;
+		border-radius: 28px 28px 0 0;
+		background-color: #f8faf8;
+	}
+
+	.sheet-handle {
+		width: 38px;
+		height: 4px;
+		margin: 0 auto 20px;
+		border-radius: 2px;
+		background-color: #d5dbd7;
+	}
+
+	.sheet-header {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.section-kicker {
+		display: block;
+		margin-bottom: 6px;
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.sheet-title {
+		font-size: 22px;
+	}
+
+	.close-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		border-width: 0;
+		border-radius: 18px;
+		background-color: #e9edea;
+	}
+
+	.search-box {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		height: 45px;
+		margin-top: 20px;
+		padding: 0 13px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e3e8e5;
+		border-radius: 13px;
+		background-color: #ffffff;
+	}
+
+	.search-input {
+		flex: 1;
+		margin-left: 9px;
+		font-size: 11px;
+	}
+
+	.category-tabs {
+		display: flex;
+		flex-direction: row;
+		white-space: nowrap;
+		margin: 14px 0 6px;
+	}
+
+	.category-btn {
+		margin-right: 7px;
+		padding: 7px 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e4e9e6;
+		border-radius: 11px;
+		color: #717c76;
+		background-color: #ffffff;
+		font-size: 10px;
+	}
+
+	.category-btn.active {
+		border-color: #1caa70;
+		color: #ffffff;
+		background-color: #1caf73;
+	}
+
+	.exercise-list {
+		margin-top: 4px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 18px;
+		background-color: #ffffff;
+		overflow: hidden;
+	}
+
+	.exercise-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		width: 100%;
+		padding: 12px;
+		border-width: 0;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #edf0ee;
+		background-color: #ffffff;
+	}
+
+	.exercise-item.no-border {
+		border-bottom-width: 0;
+	}
+
+	.exercise-thumb {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 45px;
+		height: 45px;
+		margin-right: 12px;
+		border-radius: 13px;
+		color: #206a4c;
+		background-color: #eaf7f1;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.exercise-copy {
+		flex: 1;
+	}
+
+	.exercise-name {
+		display: block;
+		margin-bottom: 4px;
+		font-size: 12px;
+	}
+
+	.exercise-sub {
+		color: #949d98;
+		font-size: 9px;
+	}
+
+	.exercise-tag {
+		margin-right: 8px;
+		padding: 3px 6px;
+		border-radius: 6px;
+		color: #2b8c67;
+		background-color: #edf8f3;
+		font-size: 8px;
+	}
+
+	.custom-exercise {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		margin-top: 11px;
+		padding: 10px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #c4cec8;
+		border-radius: 11px;
+		color: #348365;
+		background-color: transparent;
+		font-size: 10px;
+	}
+
+	.exercise-summary {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin: 18px 0;
+		padding: 12px;
+		border-radius: 15px;
+		background-color: #eaf7f1;
+	}
+
+	.exercise-illustration {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 51px;
+		height: 51px;
+		margin-right: 11px;
+		border-radius: 13px;
+		background-color: #ffffff;
+	}
+
+	.exercise-summary-copy {
+		flex: 1;
+	}
+
+	.exercise-summary-sub {
+		display: block;
+		margin-bottom: 4px;
+		color: #668476;
+		font-size: 9px;
+	}
+
+	.exercise-summary-strong {
+		color: #1f6f4e;
+		font-size: 10px;
+	}
+
+	.exercise-summary-btn {
+		border-width: 0;
+		background-color: transparent;
+		color: #25805d;
+		font-size: 9px;
+	}
+
+	.sets-header,
+	.set-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.sets-header {
+		padding: 0 5px 7px;
+		color: #969f9a;
+		font-size: 8px;
+	}
+
+	.col-number,
+	.set-number {
+		width: 29px;
+		text-align: center;
+	}
+
+	.col-last,
+	.last-set {
+		flex: 1;
+		text-align: center;
+	}
+
+	.col-weight,
+	.col-reps {
+		width: 63px;
+		text-align: center;
+	}
+
+	.col-check {
+		width: 32px;
+	}
+
+	.sets-list {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.set-row {
+		margin-bottom: 8px;
+		padding: 5px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 13px;
+		background-color: #ffffff;
+	}
+
+	.set-row.completed {
+		background-color: #f1faf5;
+		border-color: #cdebdc;
+	}
+
+	.set-number {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 25px;
+		border-radius: 8px;
+		color: #526159;
+		background-color: #f0f3f1;
+		font-size: 10px;
+		font-weight: 700;
+	}
+
+	.set-row.completed .set-number {
+		color: #ffffff;
+		background-color: #28b77a;
+	}
+
+	.last-set {
+		color: #8d9691;
+		font-size: 9px;
+	}
+
+	.set-input {
+		width: 63px;
+		height: 34px;
+		margin: 0 4px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e5e9e7;
+		border-radius: 9px;
+		text-align: center;
+		font-size: 11px;
+	}
+
+	.set-check {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 29px;
+		height: 29px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #dce4df;
+		border-radius: 9px;
+		background-color: #f6f8f7;
+	}
+
+	.set-row.completed .set-check {
+		background-color: #28b77a;
+		border-color: #28b77a;
+	}
+
+	.add-set {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		margin-top: 11px;
+		padding: 10px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #c4cec8;
+		border-radius: 11px;
+		color: #348365;
+		background-color: transparent;
+		font-size: 10px;
+	}
+
+	.rest-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 16px;
+		padding: 13px;
+		border-radius: 13px;
+		background-color: #edf2ef;
+	}
+
+	.rest-label {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		flex: 1;
+		color: #637168;
+		font-size: 10px;
+	}
+
+	.rest-value {
+		margin-right: 8px;
+		font-size: 13px;
+	}
+
+	.rest-btn {
+		padding: 6px 8px;
+		border-width: 0;
+		border-radius: 7px;
+		color: #287b5a;
+		background-color: #ffffff;
+		font-size: 8px;
+	}
+
+	.save-workout {
+		width: 100%;
+		margin-top: 14px;
+		padding: 15px;
+		border-width: 0;
+		border-radius: 14px;
+		color: #ffffff;
+		background-color: #1db676;
+		font-size: 12px;
+		font-weight: 700;
+	}
+</style>
