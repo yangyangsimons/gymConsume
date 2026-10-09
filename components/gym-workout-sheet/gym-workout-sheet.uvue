@@ -4,8 +4,8 @@
 			<view class="sheet-handle"></view>
 			<view class="sheet-header">
 				<view>
-					<text class="section-kicker">{{ step === 'select' ? 'NEW WORKOUT' : 'PUSH DAY' }}</text>
-					<text class="sheet-title">{{ step === 'select' ? '添加训练动作' : '杠铃卧推' }}</text>
+					<text class="section-kicker">{{ step === 'select' ? 'NEW WORKOUT' : 'TRAINING LOG' }}</text>
+					<text class="sheet-title">{{ step === 'select' ? '添加训练动作' : selectedName }}</text>
 				</view>
 				<button class="close-button" @click="onClose">
 					<gym-icon name="close-muted" :size="18"></gym-icon>
@@ -15,21 +15,22 @@
 			<view class="step-select" v-if="step === 'select'">
 				<view class="search-box">
 					<gym-icon name="search-muted-light" :size="19"></gym-icon>
-					<input class="search-input" placeholder="搜索动作名称或拼音" />
+					<input class="search-input" placeholder="搜索动作名称或拼音" :value="keyword" @input="onSearchInput" />
 				</view>
 				<scroll-view class="category-tabs" scroll-x="true">
 					<button class="category-btn" :class="{ active: category === item }" v-for="item in categories"
 						:key="item" @click="category = item">{{ item }}</button>
 				</scroll-view>
 				<view class="exercise-list">
-					<button class="exercise-item" :class="{ 'no-border': idx === exercises.length - 1 }"
-						v-for="(exercise, idx) in exercises" :key="exercise.name" @click="step = 'entry'">
+					<text class="exercise-empty" v-if="loadingExercises">加载中…</text>
+					<text class="exercise-empty" v-else-if="filteredExercises.length === 0">没有找到动作</text>
+					<button class="exercise-item" :class="{ 'no-border': idx === filteredExercises.length - 1 }"
+						v-for="(exercise, idx) in filteredExercises" :key="exercise._id" @click="selectExercise(exercise)">
 						<view class="exercise-thumb" :class="'thumb-' + idx">{{ exercise.icon }}</view>
 						<view class="exercise-copy">
 							<text class="exercise-name">{{ exercise.name }}</text>
 							<text class="exercise-sub">{{ exercise.sub }}</text>
 						</view>
-						<text class="exercise-tag" v-if="idx === 0">常用</text>
 						<gym-icon name="chevron-muted-light" :size="18"></gym-icon>
 					</button>
 				</view>
@@ -44,10 +45,10 @@
 						<gym-icon name="dumbbell-brand" :size="36"></gym-icon>
 					</view>
 					<view class="exercise-summary-copy">
-						<text class="exercise-summary-sub">胸大肌 · 三头肌</text>
-						<text class="exercise-summary-strong">历史最佳 80 kg × 5</text>
+						<text class="exercise-summary-sub">{{ selectedSub }}</text>
+						<text class="exercise-summary-strong">{{ bestLabel }}</text>
 					</view>
-					<button class="exercise-summary-btn">动作说明</button>
+					<button class="exercise-summary-btn" @click="step = 'select'">换动作</button>
 				</view>
 				<view class="sets-header">
 					<text class="col-number">组</text>
@@ -81,23 +82,20 @@
 					<text class="rest-value">01:30</text>
 					<button class="rest-btn">开始计时</button>
 				</view>
-				<button class="save-workout" @click="onClose">完成并保存</button>
+				<button class="save-workout" :disabled="saving" @click="onSave">{{ saving ? '保存中…' : '完成并保存' }}</button>
 			</view>
 		</view>
 	</view>
 </template>
 
 <script setup lang="uts">
+	import { Exercise, SetLog, Workout, bestSetOf, lastSetsOf } from '@/services/gym-stats.uts'
+	import { loadExercises, loadWorkouts, saveExerciseLog } from '@/services/gym-api.uts'
+
 	type WorkoutSet = {
 		weight : string
 		reps : string
 		done : boolean
-	}
-
-	type Exercise = {
-		name : string
-		sub : string
-		icon : string
 	}
 
 	type InputEventDetail = {
@@ -109,26 +107,70 @@
 
 	const emit = defineEmits(['close'])
 
+	const openedAt = Date.now()
 	const step = ref<string>('select')
 	const category = ref<string>('胸')
 	const categories = ref<string[]>(['胸', '背', '腿', '肩', '手臂', '核心'])
+	const keyword = ref<string>('')
+	const loadingExercises = ref<boolean>(true)
+	const saving = ref<boolean>(false)
 
-	const exercises = ref<Exercise[]>([
-		{ name: '杠铃卧推', sub: '胸大肌 · 三头肌', icon: '卧' } as Exercise,
-		{ name: '上斜哑铃卧推', sub: '上胸 · 三角肌前束', icon: '斜' } as Exercise,
-		{ name: '绳索夹胸', sub: '胸大肌', icon: '夹' } as Exercise,
-		{ name: '双杠臂屈伸', sub: '下胸 · 三头肌', icon: '屈' } as Exercise
-	])
+	const exercises = ref<Exercise[]>([])
+	const history = ref<Workout[]>([])
+	const selected = ref<Exercise | null>(null)
+	const selectedName = ref<string>('')
+	const selectedSub = ref<string>('')
+	const bestLabel = ref<string>('')
+	const lastSets = ref<SetLog[]>([])
 
-	const sets = ref<WorkoutSet[]>([
-		{ weight: '60', reps: '10', done: true } as WorkoutSet,
-		{ weight: '65', reps: '8', done: false } as WorkoutSet,
-		{ weight: '', reps: '', done: false } as WorkoutSet
-	])
+	const sets = ref<WorkoutSet[]>([])
+
+	const filteredExercises = computed(() : Exercise[] => {
+		const kw = keyword.value.trim().toLowerCase()
+		return exercises.value.filter((e : Exercise) : boolean => {
+			if (kw.length > 0) return e.name.includes(kw) || e.pinyin.includes(kw)
+			return e.category == category.value
+		})
+	})
+
+	onMounted(() => {
+		loadExercises().then((list : Exercise[]) => {
+			exercises.value = list
+			loadingExercises.value = false
+		}).catch(() => {
+			loadingExercises.value = false
+			uni.showToast({ title: '动作库加载失败', icon: 'none' })
+		})
+		loadWorkouts().then((list : Workout[]) => {
+			history.value = list
+		}).catch(() => { })
+	})
+
+	function newSets() : WorkoutSet[] {
+		return [
+			{ weight: '', reps: '', done: false } as WorkoutSet,
+			{ weight: '', reps: '', done: false } as WorkoutSet,
+			{ weight: '', reps: '', done: false } as WorkoutSet
+		]
+	}
+
+	function onSearchInput(e : InputEvent) {
+		keyword.value = e.detail.value
+	}
+
+	function selectExercise(exercise : Exercise) {
+		selected.value = exercise
+		selectedName.value = exercise.name
+		selectedSub.value = exercise.sub
+		lastSets.value = lastSetsOf(history.value, exercise._id)
+		const best = bestSetOf(history.value, exercise._id)
+		bestLabel.value = best == null ? '还没有历史记录' : '历史最佳 ' + best.weight + ' kg × ' + best.reps
+		sets.value = newSets()
+		step.value = 'entry'
+	}
 
 	function lastSetLabel(i : number) : string {
-		if (i == 0) return '57.5 × 10'
-		if (i == 1) return '62.5 × 8'
+		if (i < lastSets.value.length) return lastSets.value[i].weight + ' × ' + lastSets.value[i].reps
 		return '—'
 	}
 
@@ -155,6 +197,40 @@
 
 	function addSet() {
 		sets.value.push({ weight: '', reps: '', done: false } as WorkoutSet)
+	}
+
+	async function onSave() {
+		const exercise = selected.value
+		if (exercise == null || saving.value) return
+		const logs : SetLog[] = []
+		for (let i = 0; i < sets.value.length; i++) {
+			const s = sets.value[i]
+			const weight = s.weight == '' ? 0 : parseFloat(s.weight)
+			const reps = parseInt(s.reps)
+			if (s.done && !isNaN(weight) && !isNaN(reps) && reps > 0) {
+				logs.push({ weight: weight, reps: reps, done: true } as SetLog)
+			}
+		}
+		if (logs.length == 0) {
+			uni.showToast({ title: '请填写并勾选至少一组', icon: 'none' })
+			return
+		}
+		saving.value = true
+		try {
+			const minutes = Math.max(1, Math.round((Date.now() - openedAt) / 60000))
+			await saveExerciseLog({
+				exerciseId: exercise._id,
+				name: exercise.name,
+				category: exercise.category,
+				sets: logs
+			}, minutes)
+			uni.$emit('workout-saved')
+			uni.showToast({ title: '已保存', icon: 'none' })
+			emit('close')
+		} catch (e) {
+			uni.showToast({ title: '保存失败，请重试', icon: 'none' })
+		}
+		saving.value = false
 	}
 
 	function onClose() {
@@ -330,13 +406,11 @@
 		font-size: 9px;
 	}
 
-	.exercise-tag {
-		margin-right: 8px;
-		padding: 3px 6px;
-		border-radius: 6px;
-		color: #2b8c67;
-		background-color: #edf8f3;
-		font-size: 8px;
+	.exercise-empty {
+		padding: 24px 0;
+		color: #949d98;
+		font-size: 11px;
+		text-align: center;
 	}
 
 	.custom-exercise {

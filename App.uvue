@@ -5,6 +5,16 @@
 
 	onLaunch(() => {
 		console.log('App Launch')
+		    if (!wx.cloud) {
+      console.error('当前微信基础库不支持云开发')
+      return
+    }
+
+    wx.cloud.init({
+      env: 'cloud1-d0gjxp9f1819c8c1e',
+      traceUser: true
+    })
+		console.log('Cloud initialized')
 	})
 
 	onAppShow(() => {

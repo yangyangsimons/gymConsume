@@ -1,0 +1,88 @@
+import { Exercise, ExerciseLog, Workout, addDays, formatDate, round1, setVolume } from './gym-stats.uts'
+
+const PAGE_SIZE = 20
+const HISTORY_DAYS = 365
+
+let exercisesPromise : Promise<Exercise[]> | null = null
+let workoutsPromise : Promise<Workout[]> | null = null
+
+function getDb() : any {
+	return wx.cloud.database()
+}
+
+async function fetchAll(makeQuery : (skip : number) => any) : Promise<any[]> {
+	const out : any[] = []
+	while (true) {
+		const res = await makeQuery(out.length).get()
+		const data = res.data as any[]
+		for (let i = 0; i < data.length; i++) out.push(data[i])
+		if (data.length < PAGE_SIZE) break
+	}
+	return out
+}
+
+export function loadExercises() : Promise<Exercise[]> {
+	if (exercisesPromise == null) {
+		const db = getDb()
+		const p = fetchAll((skip : number) : any => db.collection('exercises').orderBy('sort', 'asc').skip(skip).limit(PAGE_SIZE))
+			.then((rows : any[]) : Exercise[] => rows as Exercise[])
+		p.catch(() => { exercisesPromise = null })
+		exercisesPromise = p
+	}
+	return exercisesPromise!
+}
+
+// 近一年训练记录，按日期倒序；保存后会失效重新拉取
+export function loadWorkouts() : Promise<Workout[]> {
+	if (workoutsPromise == null) {
+		const db = getDb()
+		const _ = db.command
+		const since = formatDate(addDays(new Date(), -(HISTORY_DAYS - 1)))
+		const p = fetchAll((skip : number) : any => db.collection('workouts')
+			.where({ date: _.gte(since) })
+			.orderBy('date', 'desc')
+			.skip(skip)
+			.limit(PAGE_SIZE))
+			.then((rows : any[]) : Workout[] => rows as Workout[])
+		p.catch(() => { workoutsPromise = null })
+		workoutsPromise = p
+	}
+	return workoutsPromise!
+}
+
+// 同一天的多个动作累加到当天的一条训练记录中
+export async function saveExerciseLog(log : ExerciseLog, durationMin : number) : Promise<void> {
+	const db = getDb()
+	const _ = db.command
+	const today = formatDate(new Date())
+	let doneSets = 0
+	for (let i = 0; i < log.sets.length; i++) {
+		if (log.sets[i].done) doneSets++
+	}
+	const volume = round1(setVolume(log.sets))
+
+	const found = await db.collection('workouts').where({ date: today }).limit(1).get()
+	const rows = found.data as any[]
+	if (rows.length > 0) {
+		await db.collection('workouts').doc(rows[0]._id as string).update({
+			data: {
+				exercises: _.push(log),
+				totalSets: _.inc(doneSets),
+				totalVolume: _.inc(volume),
+				durationMin: _.inc(durationMin)
+			}
+		})
+	} else {
+		await db.collection('workouts').add({
+			data: {
+				date: today,
+				exercises: [log],
+				totalSets: doneSets,
+				totalVolume: volume,
+				durationMin: durationMin,
+				createdAt: Date.now()
+			}
+		})
+	}
+	workoutsPromise = null
+}

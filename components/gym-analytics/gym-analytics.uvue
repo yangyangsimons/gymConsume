@@ -8,18 +8,19 @@
 		<view class="stat-grid">
 			<view class="stat-card">
 				<text class="stat-label">总训练</text>
-				<text class="stat-value">48<text class="stat-unit"> 次</text></text>
+				<text class="stat-value">{{ overview.count }}<text class="stat-unit"> 次</text></text>
 				<text class="stat-meta">近 90 天</text>
 			</view>
 			<view class="stat-card">
 				<text class="stat-label">训练容量</text>
-				<text class="stat-value">126<text class="stat-unit"> 吨</text></text>
-				<text class="stat-meta positive">↑ 12.6%</text>
+				<text class="stat-value">{{ overview.tons }}<text class="stat-unit"> 吨</text></text>
+				<text class="stat-meta positive" v-if="overview.hasPrev">{{ overview.tonsChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(overview.tonsChangePct) }}%</text>
+				<text class="stat-meta" v-else>暂无对比</text>
 			</view>
 			<view class="stat-card">
 				<text class="stat-label">训练时长</text>
-				<text class="stat-value">42<text class="stat-unit"> h</text></text>
-				<text class="stat-meta">平均 52 分钟</text>
+				<text class="stat-value">{{ overview.hours }}<text class="stat-unit"> h</text></text>
+				<text class="stat-meta">平均 {{ overview.avgMinutes }} 分钟</text>
 			</view>
 		</view>
 
@@ -37,9 +38,9 @@
 				<view class="heat-cell" :class="'heat-' + value" v-for="(value, idx) in heatValues" :key="idx"></view>
 			</view>
 			<view class="heatmap-labels">
-				<text class="heatmap-month">2月</text>
-				<text class="heatmap-month">3月</text>
-				<text class="heatmap-month">4月</text>
+				<text class="heatmap-month">{{ heatLabels[0] }}</text>
+				<text class="heatmap-month">{{ heatLabels[1] }}</text>
+				<text class="heatmap-month">{{ heatLabels[2] }}</text>
 				<view class="heatmap-legend">
 					<text>少</text>
 					<view class="heat-cell heat-1"></view>
@@ -55,18 +56,19 @@
 					<text class="section-kicker">STRENGTH</text>
 					<text class="section-title">卧推趋势</text>
 				</view>
-				<text class="pr-chip">PR 82.5 kg</text>
+				<text class="pr-chip">PR {{ trend.pr }} kg</text>
 			</view>
 			<view class="chart-value">
-				<text class="chart-value-strong">2,480</text>
+				<text class="chart-value-strong">{{ trend.totalVolume }}</text>
 				<text class="chart-value-unit">kg 总容量</text>
 			</view>
-			<image class="line-chart" src="/static/charts/line-chart.svg" mode="widthFix"></image>
+			<view class="bar-chart">
+				<view class="bar-col" v-for="bar in trend.bars" :key="bar.label">
+					<view class="bar" :style="{ height: bar.height + 'px' }"></view>
+				</view>
+			</view>
 			<view class="chart-labels">
-				<text>1月</text>
-				<text>2月</text>
-				<text>3月</text>
-				<text>4月</text>
+				<text v-for="bar in trend.bars" :key="bar.label">{{ bar.label }}</text>
 			</view>
 		</view>
 
@@ -77,34 +79,20 @@
 					<text class="section-title">部位分布</text>
 				</view>
 			</view>
+			<view class="muscle-bar">
+				<view class="muscle-seg" :class="muscleColors[idx]" :style="{ width: share.percent + '%' }"
+					v-for="(share, idx) in muscle.shares" :key="share.name"></view>
+			</view>
 			<view class="distribution-content">
-				<view class="donut">
-					<image class="donut-img" src="/static/charts/donut.svg" mode="aspectFit"></image>
-					<view class="donut-center">
-						<text class="donut-value">36</text>
-						<text class="donut-label">总组数</text>
-					</view>
+				<view class="muscle-total">
+					<text class="donut-value">{{ muscle.totalSets }}</text>
+					<text class="donut-label">总组数 · 近 90 天</text>
 				</view>
 				<view class="muscle-list">
-					<view class="muscle-row">
-						<view class="muscle-dot green"></view>
-						<text class="muscle-name">胸部</text>
-						<text class="muscle-value">28%</text>
-					</view>
-					<view class="muscle-row">
-						<view class="muscle-dot blue"></view>
-						<text class="muscle-name">背部</text>
-						<text class="muscle-value">24%</text>
-					</view>
-					<view class="muscle-row">
-						<view class="muscle-dot orange"></view>
-						<text class="muscle-name">腿部</text>
-						<text class="muscle-value">21%</text>
-					</view>
-					<view class="muscle-row">
-						<view class="muscle-dot gray"></view>
-						<text class="muscle-name">其他</text>
-						<text class="muscle-value">27%</text>
+					<view class="muscle-row" v-for="(share, idx) in muscle.shares" :key="share.name">
+						<view class="muscle-dot" :class="muscleColors[idx]"></view>
+						<text class="muscle-name">{{ share.name }}</text>
+						<text class="muscle-value">{{ share.percent }}%</text>
 					</view>
 				</view>
 			</view>
@@ -113,14 +101,51 @@
 </template>
 
 <script setup lang="uts">
-	const heatValues = ref<number[]>([
-		0, 1, 0, 2, 0, 0, 1, 1, 2, 0, 0, 1, 3, 0, 0, 2, 3, 1, 0, 0, 1, 2, 3, 0, 2, 1, 4, 0,
-		1, 2, 0, 4, 2, 1, 0, 0, 3, 2, 1, 3, 0, 2, 1, 4, 3, 2, 0, 1, 3, 2, 3, 1, 4, 2, 3, 0,
-		1, 2, 4, 3, 2, 1, 0, 0, 3, 2, 4, 3, 2, 1, 2, 4, 3, 1, 2, 3, 0
-	])
+	import { ExerciseTrend, MuscleStats, Overview, Workout, addDays, calcExerciseTrend, calcHeatmap, calcMuscleStats, calcOverview } from '@/services/gym-stats.uts'
+	import { loadWorkouts } from '@/services/gym-api.uts'
 
-	const periods = ref<string[]>(['近 12 周', '近一年'])
+	const BENCH_ID = 'chest-01'
+	const muscleColors : string[] = ['green', 'blue', 'orange', 'gray']
+
+	const workouts = ref<Workout[]>([])
+	const today = ref<Date>(new Date())
+
+	const periods = ref<string[]>(['近 12 周', '近 20 周'])
 	const periodIndex = ref(0)
+	const periodDays = computed(() : number => periodIndex.value == 0 ? 84 : 140)
+
+	const overview = computed(() : Overview => calcOverview(workouts.value, today.value))
+	const heatValues = computed(() : number[] => calcHeatmap(workouts.value, today.value, periodDays.value))
+	const trend = computed(() : ExerciseTrend => calcExerciseTrend(workouts.value, BENCH_ID, today.value, 4))
+	const muscle = computed(() : MuscleStats => calcMuscleStats(workouts.value, today.value))
+
+	const heatLabels = computed(() : string[] => {
+		const n = periodDays.value
+		const pick = (back : number) : string => (addDays(today.value, -back).getMonth() + 1) + '月'
+		return [pick(n - 1), pick(Math.round(n / 2)), pick(0)]
+	})
+
+	function refresh() {
+		today.value = new Date()
+		loadWorkouts().then((list : Workout[]) => {
+			workouts.value = list
+		}).catch(() => {
+			uni.showToast({ title: '统计数据加载失败', icon: 'none' })
+		})
+	}
+
+	function onSaved() {
+		refresh()
+	}
+
+	onMounted(() => {
+		refresh()
+		uni.$on('workout-saved', onSaved)
+	})
+
+	onUnmounted(() => {
+		uni.$off('workout-saved', onSaved)
+	})
 
 	type PickerChangeEventDetail = {
 		value : string
@@ -239,7 +264,7 @@
 		display: flex;
 		flex-direction: column;
 		flex-wrap: wrap;
-		height: 87px;
+		height: 91px;
 	}
 
 	.heat-cell {
@@ -316,10 +341,25 @@
 		font-size: 9px;
 	}
 
-	.line-chart {
-		width: 100%;
-		height: 108px;
-		margin-top: 3px;
+	.bar-chart {
+		display: flex;
+		flex-direction: row;
+		align-items: flex-end;
+		height: 96px;
+		margin-top: 8px;
+	}
+
+	.bar-col {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		justify-content: flex-end;
+	}
+
+	.bar {
+		width: 28px;
+		border-radius: 6px;
+		background-color: #38b97d;
 	}
 
 	.chart-labels {
@@ -337,27 +377,26 @@
 		justify-content: space-around;
 	}
 
-	.donut {
-		position: relative;
-		width: 115px;
-		height: 115px;
+	.muscle-bar {
+		display: flex;
+		flex-direction: row;
+		height: 10px;
+		margin-bottom: 18px;
+		border-radius: 5px;
+		background-color: #edf1ee;
+		overflow: hidden;
 	}
 
-	.donut-img {
-		width: 115px;
-		height: 115px;
+	.muscle-seg {
+		height: 10px;
 	}
 
-	.donut-center {
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
+	.muscle-total {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
+		width: 115px;
 	}
 
 	.donut-value {

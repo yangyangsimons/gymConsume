@@ -2,8 +2,8 @@
 	<view>
 		<view class="topbar">
 			<view>
-				<text class="eyebrow">4月19日 · 星期六</text>
-				<text class="heading-1">早上好，保持节奏</text>
+				<text class="eyebrow">{{ dateLabel }}</text>
+				<text class="heading-1">{{ greeting }}</text>
 			</view>
 			<button class="avatar">YC</button>
 		</view>
@@ -13,16 +13,17 @@
 			<view class="hero-copy">
 				<view class="hero-pill">
 					<gym-icon name="flame-mint" :size="15"></gym-icon>
-					<text class="hero-pill-text">连续训练 6 天</text>
+					<text class="hero-pill-text">连续训练 {{ streak }} 天</text>
 				</view>
-				<text class="hero-title">本周再练 <text class="hero-title-strong">1</text> 次，就完成目标</text>
-				<text class="hero-sub">你已经超过了 72% 的训练者</text>
+				<text class="hero-title" v-if="weekRemaining > 0">本周再练 <text class="hero-title-strong">{{ weekRemaining }}</text> 次，就完成目标</text>
+				<text class="hero-title" v-else>本周目标已完成</text>
+				<text class="hero-sub">本周训练容量 {{ weekVolume }} kg</text>
 			</view>
 			<view class="progress-ring">
-				<image class="progress-ring-img" src="/static/charts/progress-ring.svg" mode="aspectFit"></image>
+				<image class="progress-ring-img" :src="ringSrc" mode="aspectFit"></image>
 				<view class="progress-ring-center">
-					<text class="progress-ring-value">3</text>
-					<text class="progress-ring-total">/ 4 次</text>
+					<text class="progress-ring-value">{{ weekCount }}</text>
+					<text class="progress-ring-total">/ {{ weekGoal }} 次</text>
 				</view>
 			</view>
 		</view>
@@ -30,12 +31,12 @@
 		<view class="section-block">
 			<view class="section-heading">
 				<view>
-					<text class="section-kicker">APRIL 2025</text>
+					<text class="section-kicker">{{ monthKicker }}</text>
 					<text class="section-title">训练日历</text>
 				</view>
 				<view class="month-controls">
-					<button class="month-btn">‹</button>
-					<button class="month-btn">›</button>
+					<button class="month-btn" @click="changeMonth(-1)">‹</button>
+					<button class="month-btn" @click="changeMonth(1)">›</button>
 				</view>
 			</view>
 			<view class="calendar">
@@ -49,9 +50,9 @@
 			<view class="calendar-summary">
 				<view class="calendar-summary-left">
 					<view class="legend-dot"></view>
-					<text>本月已训练 9 天</text>
+					<text>{{ monthDaysLabel }}</text>
 				</view>
-				<text class="calendar-summary-strong">+28% <text class="calendar-summary-small">较上月</text></text>
+				<text class="calendar-summary-strong" v-if="hasPrevMonth">{{ monthChangeLabel }} <text class="calendar-summary-small">较上月</text></text>
 			</view>
 		</view>
 
@@ -72,18 +73,18 @@
 				</view>
 				<view class="workout-info">
 					<view class="workout-info-top">
-						<text class="workout-title">推力训练</text>
-						<text class="status-tag">计划中</text>
+						<text class="workout-title">{{ todayTitle }}</text>
+						<text class="status-tag">{{ todayTag }}</text>
 					</view>
-					<text class="workout-sub">胸部 · 肩部 · 三头肌</text>
-					<view class="meta-row">
+					<text class="workout-sub">{{ todaySub }}</text>
+					<view class="meta-row" v-if="todayExerciseCount > 0">
 						<view class="meta-item">
 							<gym-icon name="clock-muted" :size="15"></gym-icon>
-							<text>约 55 分钟</text>
+							<text>已用 {{ todayMinutes }} 分钟</text>
 						</view>
 						<view class="meta-item">
 							<gym-icon name="dumbbell-muted" :size="15"></gym-icon>
-							<text>6 个动作</text>
+							<text>{{ todayExerciseCount }} 个动作</text>
 						</view>
 					</view>
 				</view>
@@ -103,6 +104,9 @@
 </template>
 
 <script setup lang="uts">
+	import { Workout, addDays, calcStreak, countDays, formatDate, parseDate, setsPerDate, weekdayIndex } from '@/services/gym-stats.uts'
+	import { loadWorkouts } from '@/services/gym-api.uts'
+
 	type CalendarCell = {
 		label : number
 		muted : boolean
@@ -117,28 +121,166 @@
 	}
 
 	const weekDays = ref<string[]>(['一', '二', '三', '四', '五', '六', '日'])
+	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
+	const monthNames : string[] = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER']
+	const weekGoal = 4
 
-	function buildCalendar() : CalendarCell[] {
-		const trainedDays : number[] = [1, 3, 5, 8, 10, 12, 15, 17, 19]
+	const workouts = ref<Workout[]>([])
+	const todayStr = ref<string>(formatDate(new Date()))
+	const monthOffset = ref<number>(0)
+
+	const trained = computed(() : Map<string, number> => setsPerDate(workouts.value))
+
+	const dateLabel = computed(() : string => {
+		const d = parseDate(todayStr.value)
+		return (d.getMonth() + 1) + '月' + d.getDate() + '日 · 星期' + weekNames[d.getDay()]
+	})
+
+	const greeting = computed(() : string => {
+		const h = new Date().getHours()
+		if (h < 11) return '早上好，保持节奏'
+		if (h < 14) return '中午好，记得补充能量'
+		if (h < 18) return '下午好，保持节奏'
+		return '晚上好，今天练了吗'
+	})
+
+	const streak = computed(() : number => calcStreak(trained.value, parseDate(todayStr.value)))
+
+	const weekStart = computed(() : Date => {
+		const t = parseDate(todayStr.value)
+		return addDays(t, -weekdayIndex(t))
+	})
+
+	const weekCount = computed(() : number => countDays(trained.value, weekStart.value, addDays(weekStart.value, 7)))
+	const weekRemaining = computed(() : number => Math.max(0, weekGoal - weekCount.value))
+	const ringSrc = computed(() : string => '/static/charts/progress-ring-' + Math.min(weekCount.value, weekGoal) + '.svg')
+
+	const weekVolume = computed(() : number => {
+		const from = formatDate(weekStart.value)
+		const to = formatDate(addDays(weekStart.value, 7))
+		let v = 0
+		for (let i = 0; i < workouts.value.length; i++) {
+			const w = workouts.value[i]
+			if (w.date >= from && w.date < to) v += w.totalVolume
+		}
+		return Math.round(v)
+	})
+
+	const viewMonth = computed(() : Date => {
+		const t = parseDate(todayStr.value)
+		return new Date(t.getFullYear(), t.getMonth() + monthOffset.value, 1)
+	})
+
+	const monthKicker = computed(() : string => monthNames[viewMonth.value.getMonth()] + ' ' + viewMonth.value.getFullYear())
+
+	function monthTrainedDays(first : Date) : number {
+		return countDays(trained.value, first, new Date(first.getFullYear(), first.getMonth() + 1, 1))
+	}
+
+	const monthDays = computed(() : number => monthTrainedDays(viewMonth.value))
+	const prevMonthDays = computed(() : number => {
+		const f = viewMonth.value
+		return monthTrainedDays(new Date(f.getFullYear(), f.getMonth() - 1, 1))
+	})
+
+	const monthDaysLabel = computed(() : string => (monthOffset.value == 0 ? '本月' : (viewMonth.value.getMonth() + 1) + '月') + '已训练 ' + monthDays.value + ' 天')
+	const hasPrevMonth = computed(() : boolean => prevMonthDays.value > 0)
+	const monthChangeLabel = computed(() : string => {
+		const pct = Math.round((monthDays.value - prevMonthDays.value) / prevMonthDays.value * 100)
+		return (pct >= 0 ? '+' : '') + pct + '%'
+	})
+
+	const calendarCells = computed(() : CalendarCell[] => {
+		const first = viewMonth.value
+		const y = first.getFullYear()
+		const m = first.getMonth()
+		const lead = weekdayIndex(first)
+		const dim = new Date(y, m + 1, 0).getDate()
+		const prevDim = new Date(y, m, 0).getDate()
+		const total = lead + dim <= 35 ? 35 : 42
 		const cells : CalendarCell[] = []
-		for (let i = 0; i < 35; i++) {
-			const day = i - 2
-			const valid = day > 0 && day <= 30
+		for (let i = 0; i < total; i++) {
+			const day = i - lead + 1
+			const valid = day > 0 && day <= dim
 			let label : number = day
 			if (!valid) {
-				label = day <= 0 ? 31 + day : day - 30
+				label = day <= 0 ? prevDim + day : day - dim
 			}
+			const key = valid ? formatDate(new Date(y, m, day)) : ''
 			cells.push({
 				label: label,
 				muted: !valid,
-				trained: trainedDays.includes(day),
-				today: day == 19
+				trained: valid && trained.value.has(key),
+				today: valid && key == todayStr.value
 			} as CalendarCell)
 		}
 		return cells
+	})
+
+	function changeMonth(delta : number) {
+		if (monthOffset.value + delta > 0) return
+		monthOffset.value += delta
 	}
 
-	const calendarCells = ref<CalendarCell[]>(buildCalendar())
+	const todayWorkouts = computed(() : Workout[] => workouts.value.filter((w : Workout) : boolean => w.date == todayStr.value))
+
+	const todayExerciseCount = computed(() : number => {
+		let n = 0
+		for (let i = 0; i < todayWorkouts.value.length; i++) n += todayWorkouts.value[i].exercises.length
+		return n
+	})
+
+	const todayMinutes = computed(() : number => {
+		let n = 0
+		for (let i = 0; i < todayWorkouts.value.length; i++) n += todayWorkouts.value[i].durationMin
+		return n
+	})
+
+	const todayNames = computed(() : string[] => {
+		const names : string[] = []
+		for (let i = 0; i < todayWorkouts.value.length; i++) {
+			const list = todayWorkouts.value[i].exercises
+			for (let j = 0; j < list.length; j++) {
+				if (!names.includes(list[j].name)) names.push(list[j].name)
+			}
+		}
+		return names
+	})
+
+	const todayTitle = computed(() : string => {
+		const cats : string[] = []
+		for (let i = 0; i < todayWorkouts.value.length; i++) {
+			const list = todayWorkouts.value[i].exercises
+			for (let j = 0; j < list.length; j++) {
+				if (!cats.includes(list[j].category)) cats.push(list[j].category)
+			}
+		}
+		return cats.length > 0 ? cats.join('/') + '训练' : '今日训练'
+	})
+	const todayTag = computed(() : string => todayExerciseCount.value > 0 ? '已记录' : '待开始')
+	const todaySub = computed(() : string => todayNames.value.length > 0 ? todayNames.value.join(' · ') : '今天还没有训练记录')
+
+	function refresh() {
+		todayStr.value = formatDate(new Date())
+		loadWorkouts().then((list : Workout[]) => {
+			workouts.value = list
+		}).catch(() => {
+			uni.showToast({ title: '训练数据加载失败', icon: 'none' })
+		})
+	}
+
+	function onSaved() {
+		refresh()
+	}
+
+	onMounted(() => {
+		refresh()
+		uni.$on('workout-saved', onSaved)
+	})
+
+	onUnmounted(() => {
+		uni.$off('workout-saved', onSaved)
+	})
 </script>
 
 <style lang="scss">

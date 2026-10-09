@@ -1,0 +1,271 @@
+export type SetLog = {
+	weight : number
+	reps : number
+	done : boolean
+}
+
+export type ExerciseLog = {
+	exerciseId : string
+	name : string
+	category : string
+	sets : SetLog[]
+}
+
+export type Workout = {
+	_id : string
+	date : string
+	durationMin : number
+	totalSets : number
+	totalVolume : number
+	exercises : ExerciseLog[]
+}
+
+export type Exercise = {
+	_id : string
+	name : string
+	sub : string
+	icon : string
+	category : string
+	pinyin : string
+}
+
+export type Overview = {
+	count : number
+	tons : number
+	hours : number
+	avgMinutes : number
+	tonsChangePct : number
+	hasPrev : boolean
+}
+
+export type TrendBar = {
+	label : string
+	value : number
+	height : number
+}
+
+export type ExerciseTrend = {
+	pr : number
+	totalVolume : number
+	bars : TrendBar[]
+}
+
+export type MuscleShare = {
+	name : string
+	percent : number
+}
+
+export type MuscleStats = {
+	totalSets : number
+	shares : MuscleShare[]
+}
+
+function pad(n : number) : string {
+	return n < 10 ? '0' + n : '' + n
+}
+
+export function formatDate(d : Date) : string {
+	return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+}
+
+export function parseDate(s : string) : Date {
+	const p = s.split('-')
+	return new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]))
+}
+
+export function addDays(d : Date, n : number) : Date {
+	return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+}
+
+// 周一为 0
+export function weekdayIndex(d : Date) : number {
+	return (d.getDay() + 6) % 7
+}
+
+export function round1(n : number) : number {
+	return Math.round(n * 10) / 10
+}
+
+export function setVolume(sets : SetLog[]) : number {
+	let v = 0
+	for (let i = 0; i < sets.length; i++) {
+		if (sets[i].done) v += sets[i].weight * sets[i].reps
+	}
+	return v
+}
+
+export function setsPerDate(workouts : Workout[]) : Map<string, number> {
+	const map = new Map<string, number>()
+	for (let i = 0; i < workouts.length; i++) {
+		const w = workouts[i]
+		map.set(w.date, (map.get(w.date) ?? 0) + w.totalSets)
+	}
+	return map
+}
+
+export function calcStreak(trained : Map<string, number>, today : Date) : number {
+	let cursor = today
+	if (!trained.has(formatDate(cursor))) cursor = addDays(cursor, -1)
+	let streak = 0
+	while (trained.has(formatDate(cursor))) {
+		streak++
+		cursor = addDays(cursor, -1)
+	}
+	return streak
+}
+
+export function countDays(trained : Map<string, number>, start : Date, endExclusive : Date) : number {
+	let n = 0
+	let cursor = start
+	while (cursor.getTime() < endExclusive.getTime()) {
+		if (trained.has(formatDate(cursor))) n++
+		cursor = addDays(cursor, 1)
+	}
+	return n
+}
+
+export function calcOverview(workouts : Workout[], today : Date) : Overview {
+	const cur0 = formatDate(addDays(today, -89))
+	const prev0 = formatDate(addDays(today, -179))
+	let count = 0
+	let volume = 0
+	let minutes = 0
+	let prevVolume = 0
+	for (let i = 0; i < workouts.length; i++) {
+		const w = workouts[i]
+		if (w.date >= cur0) {
+			count++
+			volume += w.totalVolume
+			minutes += w.durationMin
+		} else if (w.date >= prev0) {
+			prevVolume += w.totalVolume
+		}
+	}
+	return {
+		count: count,
+		tons: round1(volume / 1000),
+		hours: round1(minutes / 60),
+		avgMinutes: count > 0 ? Math.round(minutes / count) : 0,
+		tonsChangePct: prevVolume > 0 ? round1((volume - prevVolume) / prevVolume * 100) : 0,
+		hasPrev: prevVolume > 0
+	} as Overview
+}
+
+// 按每天完成组数分 0-4 级，最后一项为今天
+export function calcHeatmap(workouts : Workout[], today : Date, days : number) : number[] {
+	const sets = setsPerDate(workouts)
+	const out : number[] = []
+	for (let i = days - 1; i >= 0; i--) {
+		const n = sets.get(formatDate(addDays(today, -i))) ?? 0
+		let level = 0
+		if (n > 0) level = 1
+		if (n > 5) level = 2
+		if (n > 10) level = 3
+		if (n > 15) level = 4
+		out.push(level)
+	}
+	return out
+}
+
+export function calcExerciseTrend(workouts : Workout[], exerciseId : string, today : Date, months : number) : ExerciseTrend {
+	const keys : string[] = []
+	const labels : string[] = []
+	for (let i = months - 1; i >= 0; i--) {
+		const d = new Date(today.getFullYear(), today.getMonth() - i, 1)
+		keys.push(d.getFullYear() + '-' + pad(d.getMonth() + 1))
+		labels.push((d.getMonth() + 1) + '月')
+	}
+	const volumes : number[] = []
+	for (let i = 0; i < months; i++) volumes.push(0)
+	let pr = 0
+	let total = 0
+	for (let i = 0; i < workouts.length; i++) {
+		const w = workouts[i]
+		const idx = keys.indexOf(w.date.substring(0, 7))
+		for (let j = 0; j < w.exercises.length; j++) {
+			const log = w.exercises[j]
+			if (log.exerciseId != exerciseId) continue
+			const v = setVolume(log.sets)
+			total += v
+			if (idx >= 0) volumes[idx] += v
+			for (let k = 0; k < log.sets.length; k++) {
+				if (log.sets[k].done && log.sets[k].weight > pr) pr = log.sets[k].weight
+			}
+		}
+	}
+	let max = 0
+	for (let i = 0; i < months; i++) {
+		if (volumes[i] > max) max = volumes[i]
+	}
+	const bars : TrendBar[] = []
+	for (let i = 0; i < months; i++) {
+		bars.push({
+			label: labels[i],
+			value: Math.round(volumes[i]),
+			height: max > 0 ? Math.max(4, Math.round(volumes[i] / max * 80)) : 4
+		} as TrendBar)
+	}
+	return { pr: pr, totalVolume: Math.round(total), bars: bars } as ExerciseTrend
+}
+
+// 近 90 天按完成组数统计：胸 / 背 / 腿 / 其他
+export function calcMuscleStats(workouts : Workout[], today : Date) : MuscleStats {
+	const since = formatDate(addDays(today, -89))
+	const counts : number[] = [0, 0, 0, 0]
+	let total = 0
+	for (let i = 0; i < workouts.length; i++) {
+		const w = workouts[i]
+		if (w.date < since) continue
+		for (let j = 0; j < w.exercises.length; j++) {
+			const log = w.exercises[j]
+			let done = 0
+			for (let k = 0; k < log.sets.length; k++) {
+				if (log.sets[k].done) done++
+			}
+			let slot = 3
+			if (log.category == '胸') slot = 0
+			else if (log.category == '背') slot = 1
+			else if (log.category == '腿') slot = 2
+			counts[slot] += done
+			total += done
+		}
+	}
+	const names : string[] = ['胸部', '背部', '腿部', '其他']
+	const shares : MuscleShare[] = []
+	let used = 0
+	for (let i = 0; i < 4; i++) {
+		let percent = 0
+		if (total > 0) percent = i == 3 ? 100 - used : Math.round(counts[i] / total * 100)
+		used += percent
+		shares.push({ name: names[i], percent: percent } as MuscleShare)
+	}
+	return { totalSets: total, shares: shares } as MuscleStats
+}
+
+// workouts 按日期倒序，返回该动作最近一次的完成组
+export function lastSetsOf(workouts : Workout[], exerciseId : string) : SetLog[] {
+	for (let i = 0; i < workouts.length; i++) {
+		const w = workouts[i]
+		for (let j = w.exercises.length - 1; j >= 0; j--) {
+			if (w.exercises[j].exerciseId == exerciseId) return w.exercises[j].sets
+		}
+	}
+	return []
+}
+
+export function bestSetOf(workouts : Workout[], exerciseId : string) : SetLog | null {
+	let best : SetLog | null = null
+	for (let i = 0; i < workouts.length; i++) {
+		const w = workouts[i]
+		for (let j = 0; j < w.exercises.length; j++) {
+			const log = w.exercises[j]
+			if (log.exerciseId != exerciseId) continue
+			for (let k = 0; k < log.sets.length; k++) {
+				const s = log.sets[k]
+				if (!s.done) continue
+				if (best == null || s.weight > best.weight || (s.weight == best.weight && s.reps > best.reps)) best = s
+			}
+		}
+	}
+	return best
+}
