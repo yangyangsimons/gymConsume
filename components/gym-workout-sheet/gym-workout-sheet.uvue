@@ -327,6 +327,7 @@
 
 	.category-tabs {
 		display: flex;
+		justify-content: space-evenly;
 		flex-direction: row;
 		white-space: nowrap;
 		margin: 14px 0 6px;
