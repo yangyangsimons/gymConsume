@@ -1,0 +1,20 @@
+export function confirmDialog(title : string, content : string, confirmText : string, cancelText : string) : Promise<boolean> {
+	return new Promise<boolean>((resolve) => {
+		uni.showModal({
+			title: title,
+			content: content,
+			confirmText: confirmText,
+			cancelText: cancelText,
+			success: (res : ShowModalSuccess) => {
+				resolve(res.confirm)
+			},
+			fail: () => {
+				resolve(false)
+			}
+		})
+	})
+}
+
+export function infoDialog(title : string, content : string) : void {
+	uni.showModal({ title: title, content: content, showCancel: false, confirmText: '知道了' })
+}

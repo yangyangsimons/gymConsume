@@ -1,0 +1,16 @@
+<template>
+	<view class="workout-page">
+		<gym-workout-overview></gym-workout-overview>
+	</view>
+</template>
+
+<script setup lang="uts">
+</script>
+
+<style lang="scss">
+	.workout-page {
+		width: 100%;
+		height: 100%;
+		background-color: #f6f8f6;
+	}
+</style>

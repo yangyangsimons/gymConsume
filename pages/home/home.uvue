@@ -3,21 +3,29 @@
 		<scroll-view class="app-content" scroll-y="true">
 			<gym-dashboard @start="openWorkout"></gym-dashboard>
 		</scroll-view>
-
-		<gym-workout-sheet v-if="workoutOpen" @close="closeWorkout"></gym-workout-sheet>
 	</view>
 </template>
 
 <script setup lang="uts">
-	const workoutOpen = ref(false)
+	import { peekSessionStatus, startSession } from '@/services/workout-session.uts'
+	import { confirmDialog } from '@/services/gym-dialog.uts'
 
-	function openWorkout() {
-		workoutOpen.value = true
+	async function openWorkout() {
+		if (peekSessionStatus() == 'finished-failed') {
+			const viewLast = await confirmDialog('上次训练未提交', '上次结束的训练提交云端失败，记录仍保存在本机。要先查看并重试吗？选择“新训练”不会删除本机记录。', '查看重试', '新训练')
+			if (viewLast) {
+				uni.navigateTo({ url: '/pages/workout/workout' })
+				return
+			}
+		}
+		startSession()
+		uni.navigateTo({ url: '/pages/workout/workout' })
 	}
 
-	function closeWorkout() {
-		workoutOpen.value = false
-	}
+	// 从训练页返回后让首页刷新“继续训练”状态
+	onShow(() => {
+		uni.$emit('workout-session-changed')
+	})
 </script>
 
 <style lang="scss">

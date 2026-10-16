@@ -51,10 +51,11 @@ export function loadWorkouts() : Promise<Workout[]> {
 }
 
 // 同一天的多个动作累加到当天的一条训练记录中
-export async function saveExerciseLog(log : ExerciseLog, durationMin : number) : Promise<void> {
+// date 缺省为今天（YYYY-MM-DD）；跨天结束的训练按开始日期提交
+export async function saveExerciseLog(log : ExerciseLog, durationMin : number, date : string = '') : Promise<void> {
 	const db = getDb()
 	const _ = db.command
-	const today = formatDate(new Date())
+	const today = date == '' ? formatDate(new Date()) : date
 	let doneSets = 0
 	for (let i = 0; i < log.sets.length; i++) {
 		if (log.sets[i].done) doneSets++

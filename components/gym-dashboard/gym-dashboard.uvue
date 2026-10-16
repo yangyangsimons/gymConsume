@@ -98,7 +98,7 @@
 			<view class="start-button-icon">
 				<gym-icon name="plus-white" :size="22"></gym-icon>
 			</view>
-			<text>开始今日训练</text>
+			<text>{{ startLabel }}</text>
 		</button>
 	</view>
 </template>
@@ -106,6 +106,7 @@
 <script setup lang="uts">
 	import { Workout, addDays, calcStreak, countDays, formatDate, parseDate, setsPerDate, weekdayIndex } from '@/services/gym-stats.uts'
 	import { loadWorkouts } from '@/services/gym-api.uts'
+	import { peekSessionStatus } from '@/services/workout-session.uts'
 
 	type CalendarCell = {
 		label : number
@@ -128,6 +129,7 @@
 	const workouts = ref<Workout[]>([])
 	const todayStr = ref<string>(formatDate(new Date()))
 	const monthOffset = ref<number>(0)
+	const draftActive = ref<boolean>(false)
 
 	const trained = computed(() : Map<string, number> => setsPerDate(workouts.value))
 
@@ -257,8 +259,16 @@
 		}
 		return cats.length > 0 ? cats.join('/') + '训练' : '今日训练'
 	})
-	const todayTag = computed(() : string => todayExerciseCount.value > 0 ? '已记录' : '待开始')
-	const todaySub = computed(() : string => todayNames.value.length > 0 ? todayNames.value.join(' · ') : '今天还没有训练记录')
+	const todayTag = computed(() : string => draftActive.value ? '进行中' : (todayExerciseCount.value > 0 ? '已记录' : '待开始'))
+	const todaySub = computed(() : string => {
+		if (draftActive.value && todayNames.value.length == 0) return '有一场未结束的训练，已保存到本机'
+		return todayNames.value.length > 0 ? todayNames.value.join(' · ') : '今天还没有训练记录'
+	})
+	const startLabel = computed(() : string => draftActive.value ? '继续今日训练' : '开始今日训练')
+
+	function refreshDraft() {
+		draftActive.value = peekSessionStatus() == 'active'
+	}
 
 	function refresh() {
 		todayStr.value = formatDate(new Date())
@@ -275,11 +285,14 @@
 
 	onMounted(() => {
 		refresh()
+		refreshDraft()
 		uni.$on('workout-saved', onSaved)
+		uni.$on('workout-session-changed', refreshDraft)
 	})
 
 	onUnmounted(() => {
 		uni.$off('workout-saved', onSaved)
+		uni.$off('workout-session-changed', refreshDraft)
 	})
 </script>
 

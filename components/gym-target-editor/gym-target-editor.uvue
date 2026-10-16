@@ -1,0 +1,308 @@
+<template>
+	<view class="te-backdrop" @click.stop="onClose">
+		<view class="te-sheet" @click.stop="noop">
+			<view class="te-handle"></view>
+			<view class="te-header">
+				<view class="te-header-copy">
+					<text class="te-kicker">EXERCISE TARGET</text>
+					<text class="te-title">编辑目标</text>
+				</view>
+				<button class="te-close" @click="onClose">
+					<gym-icon name="close-muted" :size="18"></gym-icon>
+				</button>
+			</view>
+			<scroll-view class="te-body" scroll-y="true">
+				<text class="te-note">仅修改本次训练的目标，不会改动已填写的重量、次数、实际 RIR 和完成状态；减少组数也不会删除已有的组。</text>
+
+				<view class="te-field">
+					<text class="te-label">目标正式组数</text>
+					<view class="te-row">
+						<input class="te-input" type="number" :value="form.workSets" placeholder="3" maxlength="2"
+							@input="onField('workSets', $event)" />
+						<text class="te-unit">组（不含热身组）</text>
+					</view>
+					<text class="te-error" v-if="errors.workSets !== ''">{{ errors.workSets }}</text>
+				</view>
+
+				<view class="te-field">
+					<text class="te-label">每组次数范围</text>
+					<view class="te-row">
+						<input class="te-input" type="number" :value="form.repsMin" placeholder="最少" maxlength="3"
+							@input="onField('repsMin', $event)" />
+						<text class="te-dash">–</text>
+						<input class="te-input" type="number" :value="form.repsMax" placeholder="最多" maxlength="3"
+							@input="onField('repsMax', $event)" />
+						<text class="te-unit">次</text>
+					</view>
+					<text class="te-error" v-if="errors.reps !== ''">{{ errors.reps }}</text>
+				</view>
+
+				<view class="te-field">
+					<text class="te-label">目标 RIR 范围</text>
+					<view class="te-row">
+						<button class="te-chip" :class="{ active: form.rirEnabled }" @click="setRirEnabled(true)">设置</button>
+						<button class="te-chip" :class="{ active: !form.rirEnabled }" @click="setRirEnabled(false)">不设置</button>
+					</view>
+					<view class="te-row te-row-gap" v-if="form.rirEnabled">
+						<input class="te-input" type="number" :value="form.rirMin" placeholder="下限" maxlength="1"
+							@input="onField('rirMin', $event)" />
+						<text class="te-dash">–</text>
+						<input class="te-input" type="number" :value="form.rirMax" placeholder="上限" maxlength="1"
+							@input="onField('rirMax', $event)" />
+						<text class="te-unit">剩余次数</text>
+					</view>
+					<text class="te-error" v-if="errors.rir !== ''">{{ errors.rir }}</text>
+				</view>
+
+				<view class="te-field">
+					<text class="te-label">默认组间休息</text>
+					<view class="te-row">
+						<input class="te-input" type="number" :value="form.restSeconds" placeholder="90" maxlength="3"
+							@input="onField('restSeconds', $event)" />
+						<text class="te-unit">秒</text>
+					</view>
+					<text class="te-error" v-if="errors.rest !== ''">{{ errors.rest }}</text>
+				</view>
+			</scroll-view>
+			<view class="te-footer">
+				<button class="te-save" :class="{ 'is-disabled': hasError }" :disabled="hasError" @click="onSave">保存目标</button>
+				<view class="te-safe"></view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ExerciseTarget, TargetErrors, TargetForm, formToTarget, hasTargetError, targetToForm, validateTargetForm } from '@/services/workout-session.uts'
+
+	type InputEventDetail = {
+		value : string
+	}
+	type InputEvent = {
+		detail : InputEventDetail
+	}
+
+	const { target } = defineProps<{
+		target : ExerciseTarget
+	}>()
+
+	const emit = defineEmits(['save', 'close'])
+
+	const form = ref<TargetForm>(targetToForm(target))
+	const errors = computed(() : TargetErrors => validateTargetForm(form.value))
+	const hasError = computed(() : boolean => hasTargetError(errors.value))
+
+	function onField(key : string, e : InputEvent) {
+		const v = e.detail.value
+		if (key == 'workSets') form.value.workSets = v
+		else if (key == 'repsMin') form.value.repsMin = v
+		else if (key == 'repsMax') form.value.repsMax = v
+		else if (key == 'rirMin') form.value.rirMin = v
+		else if (key == 'rirMax') form.value.rirMax = v
+		else if (key == 'restSeconds') form.value.restSeconds = v
+	}
+
+	function setRirEnabled(enabled : boolean) {
+		form.value.rirEnabled = enabled
+	}
+
+	function onSave() {
+		if (hasError.value) return
+		emit('save', formToTarget(form.value))
+	}
+
+	function onClose() {
+		emit('close')
+	}
+
+	function noop() {
+		// 阻止点击面板内容时冒泡到背景层
+	}
+</script>
+
+<style lang="scss">
+	.te-backdrop {
+		position: fixed;
+		z-index: 40;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		display: flex;
+		flex-direction: column;
+		justify-content: flex-end;
+		background-color: #13251ccc;
+	}
+
+	.te-sheet {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		height: 84%;
+		padding: 9px 22px 0;
+		border-radius: 28px 28px 0 0;
+		background-color: #f8faf8;
+	}
+
+	.te-handle {
+		width: 38px;
+		height: 14px;
+		margin: 0 auto 12px;
+		border-radius: 2px;
+		background-color: #d5dbd7;
+	}
+
+	.te-header {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.te-header-copy {
+		flex: 1;
+	}
+
+	.te-kicker {
+		display: block;
+		margin-bottom: 6px;
+		color: #7d8982;
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.te-title {
+		font-size: 22px;
+	}
+
+	.te-close {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		border-width: 0;
+		border-radius: 18px;
+		background-color: #e9edea;
+	}
+
+	.te-body {
+		flex: 1;
+		height: 0;
+		margin-top: 8px;
+	}
+
+	.te-note {
+		display: block;
+		margin-bottom: 14px;
+		color: #7d8982;
+		font-size: 13px;
+		line-height: 1.6;
+	}
+
+	.te-field {
+		margin-bottom: 14px;
+		padding: 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 16px;
+		background-color: #ffffff;
+	}
+
+	.te-label {
+		display: block;
+		margin-bottom: 10px;
+		color: #1f2a24;
+		font-size: 15px;
+		font-weight: 700;
+	}
+
+	.te-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.te-row-gap {
+		margin-top: 10px;
+	}
+
+	.te-input {
+		width: 84px;
+		height: 44px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e5e9e7;
+		border-radius: 10px;
+		background-color: #fbfcfb;
+		font-size: 17px;
+		text-align: center;
+	}
+
+	.te-dash {
+		margin: 0 10px;
+		color: #8d9691;
+		font-size: 16px;
+	}
+
+	.te-unit {
+		flex: 1;
+		margin-left: 10px;
+		color: #7d8982;
+		font-size: 13px;
+	}
+
+	.te-chip {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 84px;
+		height: 40px;
+		margin: 0 8px 0 0;
+		padding: 0 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e4e9e6;
+		border-radius: 11px;
+		color: #717c76;
+		background-color: #ffffff;
+		font-size: 14px;
+	}
+
+	.te-chip.active {
+		border-color: #1caa70;
+		color: #ffffff;
+		background-color: #1caf73;
+	}
+
+	.te-error {
+		display: block;
+		margin-top: 8px;
+		color: #d4493f;
+		font-size: 13px;
+	}
+
+	.te-footer {
+		padding: 10px 0 12px;
+	}
+
+	.te-save {
+		width: 100%;
+		padding: 15px;
+		border-width: 0;
+		border-radius: 14px;
+		color: #ffffff;
+		background-color: #1db676;
+		font-size: 17px;
+		font-weight: 700;
+	}
+
+	.te-save.is-disabled {
+		opacity: 0.45;
+	}
+
+	.te-safe {
+		height: env(safe-area-inset-bottom);
+	}
+</style>

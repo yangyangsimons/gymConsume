@@ -1,18 +1,18 @@
 <template>
-	<view class="sheet-backdrop" @click="onBackdropClick">
+	<view class="sheet-backdrop" @click="requestClose">
 		<view class="workout-sheet" @click.stop="noop">
 			<view class="sheet-handle"></view>
 			<view class="sheet-header">
-				<view>
+				<view class="sheet-header-copy">
 					<text class="section-kicker">{{ step === 'select' ? 'NEW WORKOUT' : 'TRAINING LOG' }}</text>
-					<text class="sheet-title">{{ step === 'select' ? '添加训练动作' : selectedName }}</text>
+					<text class="sheet-title">{{ step === 'select' ? '添加训练动作' : workTitle }}</text>
 				</view>
-				<button class="close-button" @click="onClose">
+				<button class="close-button" @click="requestClose">
 					<gym-icon name="close-muted" :size="18"></gym-icon>
 				</button>
 			</view>
 
-			<view class="step-select" v-if="step === 'select'">
+			<scroll-view class="sheet-body" scroll-y="true" v-if="step === 'select'">
 				<view class="search-box">
 					<gym-icon name="search-muted-light" :size="19"></gym-icon>
 					<input class="search-input" placeholder="搜索动作名称或拼音" :value="keyword" @input="onSearchInput" />
@@ -38,36 +38,65 @@
 					<gym-icon name="plus-brand" :size="18"></gym-icon>
 					<text>创建自定义动作</text>
 				</button>
-			</view>
-			<view class="step-entry" v-else>
+				<view class="body-pad"></view>
+			</scroll-view>
+
+			<scroll-view class="sheet-body" scroll-y="true" v-else>
 				<view class="exercise-summary">
-					<view class="exercise-illustration">
-						<gym-icon name="dumbbell-brand" :size="36"></gym-icon>
+					<view class="summary-top">
+						<view class="exercise-illustration">
+							<gym-icon name="dumbbell-brand" :size="30"></gym-icon>
+						</view>
+						<view class="summary-copy">
+							<text class="summary-target">{{ targetLabel }}</text>
+							<text class="summary-progress">{{ progressLabel }}</text>
+						</view>
 					</view>
-					<view class="exercise-summary-copy">
-						<text class="exercise-summary-sub">{{ selectedSub }}</text>
-						<text class="exercise-summary-strong">{{ bestLabel }}</text>
+					<view class="summary-actions">
+						<button class="summary-btn primary" @click="showTarget = true">编辑目标</button>
+						<button class="summary-btn" @click="step = 'select'">换动作</button>
 					</view>
-					<button class="exercise-summary-btn" @click="step = 'select'">换动作</button>
 				</view>
+
 				<view class="sets-header">
-					<text class="col-number">组</text>
-					<text class="col-last">上次</text>
-					<text class="col-weight">重量 kg</text>
-					<text class="col-reps">次数</text>
-					<text class="col-check"></text>
+					<text class="sets-title">训练记录</text>
+					<button class="rir-help-btn" @click="showRirHelp">什么是 RIR？</button>
 				</view>
 				<view class="sets-list">
-					<view class="set-row" :class="{ completed: set.done }" v-for="(set, i) in sets" :key="i">
-						<text class="set-number">{{ i + 1 }}</text>
-						<text class="last-set">{{ lastSetLabel(i) }}</text>
-						<input class="set-input" type="digit" :value="set.weight" placeholder="0"
-							@input="onWeightInput(i, $event)" />
-						<input class="set-input" type="number" :value="set.reps" placeholder="0"
-							@input="onRepsInput(i, $event)" />
-						<button class="set-check" @click="toggleSet(i)">
-							<gym-icon name="check-white" :size="18" v-if="set.done"></gym-icon>
-						</button>
+					<view class="set-card" :class="{ completed: row.done, warmup: row.warm }" v-for="row in rows"
+						:key="row.id">
+						<view class="set-top">
+							<text class="set-badge">{{ row.badge }}</text>
+							<view class="kind-switch">
+								<button class="kind-btn" :class="{ active: !row.warm }" @click="setKind(row.id, 'work')">正式</button>
+								<button class="kind-btn" :class="{ active: row.warm }" @click="setKind(row.id, 'warmup')">热身</button>
+							</view>
+							<view class="set-top-spacer"></view>
+							<button class="set-delete" @click="removeSet(row.id)">
+								<gym-icon name="close-muted" :size="16"></gym-icon>
+							</button>
+							<button class="set-check" :class="{ checked: row.done }" @click="toggleDone(row.id)">
+								<gym-icon name="check-white" :size="20" v-if="row.done"></gym-icon>
+							</button>
+						</view>
+						<view class="set-fields">
+							<view class="field field-weight">
+								<input class="field-input" type="digit" confirm-type="done" :value="row.weight"
+									:placeholder="weightPlaceholder" @input="onWeightInput(row.id, $event)" />
+								<text class="field-unit">kg</text>
+							</view>
+							<view class="field field-reps">
+								<input class="field-input" type="number" confirm-type="done" :value="row.reps" placeholder="次数"
+									@input="onRepsInput(row.id, $event)" />
+								<text class="field-unit">次</text>
+							</view>
+							<button class="rir-field" :class="{ filled: row.rirSet }" @click="openRir(row.id)">
+								<text class="rir-caption">RIR</text>
+								<text class="rir-value">{{ row.rirText }}</text>
+							</button>
+						</view>
+						<text class="set-last" v-if="row.last !== ''">{{ row.last }}</text>
+						<text class="set-error" v-if="errorSetId === row.id">{{ errorText }}</text>
 					</view>
 				</view>
 				<button class="add-set" @click="addSet">
@@ -75,27 +104,56 @@
 					<text>添加一组</text>
 				</button>
 				<view class="rest-row">
-					<view class="rest-label">
-						<gym-icon name="clock-muted" :size="18"></gym-icon>
-						<text>组间休息</text>
+					<view class="rest-top">
+						<view class="rest-label">
+							<gym-icon name="clock-muted" :size="20"></gym-icon>
+							<text class="rest-label-text">组间休息</text>
+						</view>
+						<button class="rest-btn" :class="{ running: restRunning }" @click="toggleRest">{{ restRunning ? '停止' : '开始计时' }}</button>
 					</view>
-					<text class="rest-value">01:30</text>
-					<button class="rest-btn">开始计时</button>
+					<view class="rest-adjust">
+						<button class="rest-step" :disabled="restRunning" @click="adjustRest(-15)">−</button>
+						<text class="rest-value" :class="{ running: restRunning }">{{ formatTime(restRunning ? restRemaining : restSeconds) }}</text>
+						<button class="rest-step" :disabled="restRunning" @click="adjustRest(15)">+</button>
+					</view>
 				</view>
-				<button class="save-workout" :disabled="saving" @click="onSave">{{ saving ? '保存中…' : '完成并保存' }}</button>
+				<view class="body-pad"></view>
+			</scroll-view>
+
+			<view class="sheet-footer" v-if="step === 'entry'">
+				<button class="save-workout" @click="onSave">保存动作</button>
+				<text class="save-hint">保存到本机并返回本次训练，不会结束整场训练</text>
+				<view class="safe-bottom"></view>
 			</view>
 		</view>
+
+		<gym-rir-picker v-if="showRir" :value="rirValue" :set-label="rirSetLabel" @select="onRirSelect"
+			@close="showRir = false"></gym-rir-picker>
+		<gym-target-editor v-if="showTarget && work != null" :target="work.target" @save="onTargetSave"
+			@close="showTarget = false"></gym-target-editor>
 	</view>
 </template>
 
 <script setup lang="uts">
-	import { Exercise, SetLog, Workout, bestSetOf, lastSetsOf } from '@/services/gym-stats.uts'
-	import { loadExercises, loadWorkouts, saveExerciseLog } from '@/services/gym-api.uts'
+	import { Exercise, SetLog, Workout, lastSetsOf } from '@/services/gym-stats.uts'
+	import { loadExercises, loadWorkouts } from '@/services/gym-api.uts'
+	import {
+		EditingDraft, ExerciseProgress, ExerciseTarget, KIND_WARMUP, KIND_WORK, RIR_UNSET, SetEntry, SessionExercise,
+		WorkoutSession, cloneExercise, exerciseProgress, formatTarget, hasInput, newSessionExercise, newSet, rirLabel,
+		saveSession, startSession, validateSet
+	} from '@/services/workout-session.uts'
+	import { confirmDialog, infoDialog } from '@/services/gym-dialog.uts'
 
-	type WorkoutSet = {
+	type SetRow = {
+		id : string
+		badge : string
+		warm : boolean
 		weight : string
 		reps : string
+		rirText : string
+		rirSet : boolean
 		done : boolean
+		last : string
 	}
 
 	type InputEventDetail = {
@@ -105,25 +163,181 @@
 		detail : InputEventDetail
 	}
 
-	const emit = defineEmits(['close'])
+	const RIR_HELP = '剩余次数 RIR：完成这一组后，你估计还能以相同动作标准再做几次？例如，选择 2，表示大约还能做 2 次。'
 
-	const openedAt = Date.now()
+	const { editIndex = -1 } = defineProps<{
+		editIndex ?: number
+	}>()
+
+	const emit = defineEmits(['close', 'saved'])
+
+	const session : WorkoutSession = startSession()
 	const step = ref<string>('select')
+	const work = ref<SessionExercise | null>(null)
+	let baseline = ''
+	let editingIndex = -1
+	let closed = false
+
+	// 优先恢复上次未保存的编辑；否则按 editIndex 打开已有动作
+	function restoreWork() {
+		const draft = session.editing
+		if (draft != null) {
+			work.value = draft.exercise
+			baseline = draft.baseline
+			editingIndex = draft.index
+			step.value = 'entry'
+			return
+		}
+		if (editIndex >= 0 && editIndex < session.exercises.length) {
+			const copy = cloneExercise(session.exercises[editIndex])
+			work.value = copy
+			baseline = JSON.stringify(copy)
+			editingIndex = editIndex
+			step.value = 'entry'
+		}
+	}
+	restoreWork()
+
 	const category = ref<string>('胸')
 	const categories = ref<string[]>(['胸', '背', '腿', '肩', '手臂', '核心'])
 	const keyword = ref<string>('')
 	const loadingExercises = ref<boolean>(true)
-	const saving = ref<boolean>(false)
-
 	const exercises = ref<Exercise[]>([])
 	const history = ref<Workout[]>([])
-	const selected = ref<Exercise | null>(null)
-	const selectedName = ref<string>('')
-	const selectedSub = ref<string>('')
-	const bestLabel = ref<string>('')
-	const lastSets = ref<SetLog[]>([])
 
-	const sets = ref<WorkoutSet[]>([])
+	const showRir = ref<boolean>(false)
+	const showTarget = ref<boolean>(false)
+	const rirSetId = ref<string>('')
+	const rirSetLabel = ref<string>('')
+	const rirValue = ref<string>('')
+
+	const errorSetId = ref<string>('')
+	const errorText = ref<string>('')
+
+	const restSeconds = ref<number>(work.value != null ? work.value.target.restSeconds : 90)
+	const restRemaining = ref<number>(restSeconds.value)
+	const restRunning = ref<boolean>(false)
+	let restTimer : number = -1
+	let persistTimer : number = -1
+
+	function formatTime(total : number) : string {
+		const m = Math.floor(total / 60)
+		const s = total % 60
+		return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s
+	}
+
+	function clearRestTimer() {
+		if (restTimer != -1) {
+			clearInterval(restTimer)
+			restTimer = -1
+		}
+		restRunning.value = false
+	}
+
+	function adjustRest(delta : number) {
+		if (restRunning.value) return
+		const next = restSeconds.value + delta
+		restSeconds.value = Math.min(600, Math.max(15, next))
+	}
+
+	function toggleRest() {
+		if (restRunning.value) {
+			clearRestTimer()
+			return
+		}
+		restRemaining.value = restSeconds.value
+		restRunning.value = true
+		restTimer = setInterval(() => {
+			restRemaining.value = restRemaining.value - 1
+			if (restRemaining.value <= 0) {
+				clearRestTimer()
+				uni.vibrateLong({})
+				uni.showToast({ title: '休息结束，开始下一组', icon: 'none' })
+			}
+		}, 1000)
+	}
+
+	function persistNow() {
+		if (closed) return
+		if (persistTimer != -1) {
+			clearTimeout(persistTimer)
+			persistTimer = -1
+		}
+		const ex = work.value
+		if (ex == null) return
+		session.editing = { index: editingIndex, baseline: baseline, exercise: ex } as EditingDraft
+		saveSession(session)
+	}
+
+	function schedulePersist() {
+		if (persistTimer != -1) clearTimeout(persistTimer)
+		persistTimer = setTimeout(() => {
+			persistTimer = -1
+			persistNow()
+		}, 400)
+	}
+
+	onUnmounted(() => {
+		clearRestTimer()
+		if (persistTimer != -1) persistNow()
+	})
+
+	const workTitle = computed(() : string => work.value == null ? '' : work.value.name)
+	const targetLabel = computed(() : string => work.value == null ? '' : formatTarget(work.value.target))
+	const weightPlaceholder = computed(() : string => work.value != null && !work.value.weightRequired ? '选填' : '重量')
+
+	const progressLabel = computed(() : string => {
+		const ex = work.value
+		if (ex == null) return ''
+		const p : ExerciseProgress = exerciseProgress(ex)
+		let text = '已完成 ' + p.workDone + '/' + p.workTarget + ' 个正式组'
+		if (p.warmupTotal > 0) text += ' · 热身 ' + p.warmupDone + '/' + p.warmupTotal
+		return text
+	})
+
+	const lastSets = computed(() : SetLog[] => work.value == null ? [] : lastSetsOf(history.value, work.value.exerciseId))
+
+	function lastText(n : number) : string {
+		const list = lastSets.value
+		if (list.length == 0) return '上次 暂无记录'
+		if (n >= list.length) return '上次 无对应组'
+		const l = list[n]
+		return '上次 ' + (l.weight > 0 ? l.weight + ' kg' : '自重') + ' × ' + l.reps + ' 次 · RIR 未记录'
+	}
+
+	const rows = computed(() : SetRow[] => {
+		const out : SetRow[] = []
+		const ex = work.value
+		if (ex == null) return out
+		let workNo = 0
+		let warmNo = 0
+		for (let i = 0; i < ex.sets.length; i++) {
+			const s = ex.sets[i]
+			const warm = s.kind == KIND_WARMUP
+			let badge = ''
+			let last = ''
+			if (warm) {
+				warmNo++
+				badge = '热' + warmNo
+			} else {
+				workNo++
+				badge = '' + workNo
+				last = lastText(workNo - 1)
+			}
+			out.push({
+				id: s.id,
+				badge: badge,
+				warm: warm,
+				weight: s.weight,
+				reps: s.reps,
+				rirText: rirLabel(s.rir, '—'),
+				rirSet: s.rir != RIR_UNSET,
+				done: s.done,
+				last: last
+			} as SetRow)
+		}
+		return out
+	})
 
 	const filteredExercises = computed(() : Exercise[] => {
 		const kw = keyword.value.trim().toLowerCase()
@@ -146,98 +360,210 @@
 		}).catch(() => { })
 	})
 
-	function newSets() : WorkoutSet[] {
-		return [
-			{ weight: '', reps: '', done: false } as WorkoutSet,
-			{ weight: '', reps: '', done: false } as WorkoutSet,
-			{ weight: '', reps: '', done: false } as WorkoutSet
-		]
-	}
-
 	function onSearchInput(e : InputEvent) {
 		keyword.value = e.detail.value
 	}
 
-	function selectExercise(exercise : Exercise) {
-		selected.value = exercise
-		selectedName.value = exercise.name
-		selectedSub.value = exercise.sub
-		lastSets.value = lastSetsOf(history.value, exercise._id)
-		const best = bestSetOf(history.value, exercise._id)
-		bestLabel.value = best == null ? '还没有历史记录' : '历史最佳 ' + best.weight + ' kg × ' + best.reps
-		sets.value = newSets()
-		step.value = 'entry'
-	}
-
-	function lastSetLabel(i : number) : string {
-		if (i < lastSets.value.length) return lastSets.value[i].weight + ' × ' + lastSets.value[i].reps
-		return '—'
-	}
-
-	function updateSet(index : number, key : string, value : string) {
-		const set = sets.value[index]
-		if (key == 'weight') {
-			set.weight = value
-		} else {
-			set.reps = value
+	function anyInput() : boolean {
+		const ex = work.value
+		if (ex == null) return false
+		for (let i = 0; i < ex.sets.length; i++) {
+			if (hasInput(ex.sets[i])) return true
 		}
+		return false
 	}
 
-	function onWeightInput(index : number, e : InputEvent) {
-		updateSet(index, 'weight', e.detail.value)
+	async function selectExercise(exercise : Exercise) {
+		const cur = work.value
+		if (cur != null && cur.exerciseId == exercise._id) {
+			step.value = 'entry'
+			return
+		}
+		if (cur != null && anyInput()) {
+			const ok = await confirmDialog('更换动作', '更换后，当前动作已填写的组和目标会被重置。', '更换', '取消')
+			if (!ok) return
+		}
+		const next = newSessionExercise(exercise)
+		if (cur != null && editingIndex >= 0) {
+			next.id = cur.id
+		} else {
+			baseline = JSON.stringify(next)
+		}
+		work.value = next
+		errorSetId.value = ''
+		clearRestTimer()
+		restSeconds.value = next.target.restSeconds
+		restRemaining.value = next.target.restSeconds
+		step.value = 'entry'
+		persistNow()
 	}
 
-	function onRepsInput(index : number, e : InputEvent) {
-		updateSet(index, 'reps', e.detail.value)
+	function findSet(id : string) : SetEntry | null {
+		const ex = work.value
+		if (ex == null) return null
+		for (let i = 0; i < ex.sets.length; i++) {
+			if (ex.sets[i].id == id) return ex.sets[i]
+		}
+		return null
 	}
 
-	function toggleSet(index : number) {
-		sets.value[index].done = !sets.value[index].done
+	function clearError(id : string) {
+		if (errorSetId.value == id) errorSetId.value = ''
+	}
+
+	function onWeightInput(id : string, e : InputEvent) {
+		const s = findSet(id)
+		if (s == null) return
+		s.weight = e.detail.value
+		clearError(id)
+		schedulePersist()
+	}
+
+	function onRepsInput(id : string, e : InputEvent) {
+		const s = findSet(id)
+		if (s == null) return
+		s.reps = e.detail.value
+		clearError(id)
+		schedulePersist()
+	}
+
+	function setKind(id : string, kind : string) {
+		const s = findSet(id)
+		if (s == null || s.kind == kind) return
+		s.kind = kind
+		persistNow()
+	}
+
+	function toggleDone(id : string) {
+		const ex = work.value
+		const s = findSet(id)
+		if (ex == null || s == null) return
+		if (s.done) {
+			s.done = false
+			clearError(id)
+		} else {
+			const msg = validateSet(s, ex.weightRequired)
+			if (msg != '') {
+				errorSetId.value = id
+				errorText.value = msg
+				return
+			}
+			s.done = true
+			clearError(id)
+		}
+		persistNow()
 	}
 
 	function addSet() {
-		sets.value.push({ weight: '', reps: '', done: false } as WorkoutSet)
+		const ex = work.value
+		if (ex == null) return
+		ex.sets.push(newSet(KIND_WORK))
+		persistNow()
 	}
 
-	async function onSave() {
-		const exercise = selected.value
-		if (exercise == null || saving.value) return
-		const logs : SetLog[] = []
-		for (let i = 0; i < sets.value.length; i++) {
-			const s = sets.value[i]
-			const weight = s.weight == '' ? 0 : parseFloat(s.weight)
-			const reps = parseInt(s.reps)
-			if (s.done && !isNaN(weight) && !isNaN(reps) && reps > 0) {
-				logs.push({ weight: weight, reps: reps, done: true } as SetLog)
+	async function removeSet(id : string) {
+		const ex = work.value
+		const s = findSet(id)
+		if (ex == null || s == null) return
+		if (hasInput(s)) {
+			const ok = await confirmDialog('删除这一组', '这一组已有填写内容或已完成，删除后无法恢复。', '删除', '取消')
+			if (!ok) return
+		}
+		const idx = ex.sets.findIndex((item : SetEntry) : boolean => item.id == id)
+		if (idx < 0) return
+		ex.sets.splice(idx, 1)
+		clearError(id)
+		persistNow()
+	}
+
+	function openRir(id : string) {
+		const s = findSet(id)
+		if (s == null) return
+		let label = ''
+		for (let i = 0; i < rows.value.length; i++) {
+			if (rows.value[i].id == id) label = rows.value[i].badge
+		}
+		rirSetId.value = id
+		rirSetLabel.value = label
+		rirValue.value = s.rir
+		showRir.value = true
+	}
+
+	function onRirSelect(code : string) {
+		const s = findSet(rirSetId.value)
+		if (s != null) {
+			s.rir = code
+			persistNow()
+		}
+		showRir.value = false
+	}
+
+	function showRirHelp() {
+		infoDialog('什么是 RIR？', RIR_HELP + '\n\nRIR 为选填，不填也可以完成这一组。')
+	}
+
+	// 只替换目标，不触碰已有组的任何字段
+	function onTargetSave(target : ExerciseTarget) {
+		const ex = work.value
+		if (ex == null) return
+		ex.target = target
+		if (!restRunning.value) {
+			restSeconds.value = target.restSeconds
+			restRemaining.value = target.restSeconds
+		}
+		showTarget.value = false
+		persistNow()
+		uni.showToast({ title: '目标已更新（仅本次训练）', icon: 'none' })
+	}
+
+	function onSave() {
+		const ex = work.value
+		if (ex == null) return
+		for (let i = 0; i < ex.sets.length; i++) {
+			const s = ex.sets[i]
+			if (!s.done) continue
+			const msg = validateSet(s, ex.weightRequired)
+			if (msg != '') {
+				errorSetId.value = s.id
+				errorText.value = msg + '（该组已标记完成，请补全或取消完成）'
+				uni.showToast({ title: '有已完成的组数据不完整', icon: 'none' })
+				return
 			}
 		}
-		if (logs.length == 0) {
-			uni.showToast({ title: '请填写并勾选至少一组', icon: 'none' })
+		const copy = cloneExercise(ex)
+		if (editingIndex >= 0 && editingIndex < session.exercises.length) {
+			session.exercises[editingIndex] = copy
+		} else {
+			session.exercises.push(copy)
+		}
+		session.editing = null
+		if (!saveSession(session)) {
+			uni.showToast({ title: '本机保存失败，请重试', icon: 'none' })
 			return
 		}
-		saving.value = true
-		try {
-			const minutes = Math.max(1, Math.round((Date.now() - openedAt) / 60000))
-			await saveExerciseLog({
-				exerciseId: exercise._id,
-				name: exercise.name,
-				category: exercise.category,
-				sets: logs
-			}, minutes)
-			uni.$emit('workout-saved')
-			uni.showToast({ title: '已保存', icon: 'none' })
-			emit('close')
-		} catch (e) {
-			uni.showToast({ title: '保存失败，请重试', icon: 'none' })
+		closed = true
+		uni.showToast({ title: '已保存到本机', icon: 'none' })
+		emit('saved')
+	}
+
+	function isDirty() : boolean {
+		const ex = work.value
+		return ex != null && JSON.stringify(ex) != baseline
+	}
+
+	async function requestClose() {
+		if (showRir.value || showTarget.value) return
+		if (isDirty()) {
+			const discard = await confirmDialog('放弃修改？', '当前动作有未保存的修改，离开后将丢失。', '放弃', '继续编辑')
+			if (!discard) return
 		}
-		saving.value = false
-	}
-
-	function onClose() {
-		emit('close')
-	}
-
-	function onBackdropClick() {
+		closed = true
+		if (persistTimer != -1) {
+			clearTimeout(persistTimer)
+			persistTimer = -1
+		}
+		session.editing = null
+		saveSession(session)
 		emit('close')
 	}
 
@@ -255,22 +581,25 @@
 		right: 0;
 		bottom: 0;
 		display: flex;
-		align-items: flex-end;
+		flex-direction: column;
+		justify-content: flex-end;
 		background-color: #13251ccc;
 	}
 
 	.workout-sheet {
+		display: flex;
+		flex-direction: column;
 		width: 100%;
-		max-height: 92%;
-		padding: 9px 22px 28px;
+		height: 92%;
+		padding: 9px 22px 0;
 		border-radius: 28px 28px 0 0;
 		background-color: #f8faf8;
 	}
 
 	.sheet-handle {
 		width: 38px;
-		height: 4px;
-		margin: 0 auto 20px;
+		height: 14px;
+		margin: 0 auto 14px;
 		border-radius: 2px;
 		background-color: #d5dbd7;
 	}
@@ -282,16 +611,25 @@
 		justify-content: space-between;
 	}
 
+	.sheet-header-copy {
+		flex: 1;
+		margin-right: 12px;
+	}
+
 	.section-kicker {
 		display: block;
 		margin-bottom: 6px;
 		color: #7d8982;
-		font-size: 11px;
+		font-size: 13px;
 		font-weight: 700;
 	}
 
 	.sheet-title {
+		display: block;
 		font-size: 22px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.close-button {
@@ -303,6 +641,15 @@
 		border-width: 0;
 		border-radius: 18px;
 		background-color: #e9edea;
+	}
+
+	.sheet-body {
+		flex: 1;
+		height: 0;
+	}
+
+	.body-pad {
+		height: 20px;
 	}
 
 	.search-box {
@@ -322,7 +669,7 @@
 	.search-input {
 		flex: 1;
 		margin-left: 9px;
-		font-size: 11px;
+		font-size: 15px;
 	}
 
 	.category-tabs {
@@ -334,6 +681,9 @@
 	}
 
 	.category-btn {
+		display: flex;
+		justify-content: center;
+		align-items: center;
 		margin-right: 7px;
 		padding: 7px 14px;
 		border-width: 1px;
@@ -342,7 +692,7 @@
 		border-radius: 11px;
 		color: #717c76;
 		background-color: #ffffff;
-		font-size: 10px;
+		font-size: 14px;
 	}
 
 	.category-btn.active {
@@ -382,13 +732,13 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 45px;
-		height: 45px;
+		width: 50px;
+		height: 50px;
 		margin-right: 12px;
 		border-radius: 13px;
 		color: #206a4c;
 		background-color: #eaf7f1;
-		font-size: 12px;
+		font-size: 16px;
 		font-weight: 700;
 	}
 
@@ -399,18 +749,18 @@
 	.exercise-name {
 		display: block;
 		margin-bottom: 4px;
-		font-size: 12px;
+		font-size: 16px;
 	}
 
 	.exercise-sub {
 		color: #949d98;
-		font-size: 9px;
+		font-size: 13px;
 	}
 
 	.exercise-empty {
 		padding: 24px 0;
 		color: #949d98;
-		font-size: 11px;
+		font-size: 14px;
 		text-align: center;
 	}
 
@@ -428,86 +778,101 @@
 		border-radius: 11px;
 		color: #348365;
 		background-color: transparent;
-		font-size: 10px;
+		font-size: 15px;
 	}
 
 	.exercise-summary {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		margin: 18px 0;
+		margin: 16px 0;
 		padding: 12px;
 		border-radius: 15px;
 		background-color: #eaf7f1;
+	}
+
+	.summary-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
 	}
 
 	.exercise-illustration {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 51px;
-		height: 51px;
-		margin-right: 11px;
+		width: 56px;
+		height: 56px;
+		margin-right: 12px;
 		border-radius: 13px;
 		background-color: #ffffff;
 	}
 
-	.exercise-summary-copy {
+	.summary-copy {
 		flex: 1;
 	}
 
-	.exercise-summary-sub {
+	.summary-target {
 		display: block;
-		margin-bottom: 4px;
-		color: #668476;
-		font-size: 9px;
+		color: #1f2a24;
+		font-size: 15px;
+		font-weight: 700;
+		line-height: 1.4;
 	}
 
-	.exercise-summary-strong {
-		color: #1f6f4e;
-		font-size: 10px;
+	.summary-progress {
+		display: block;
+		margin-top: 4px;
+		color: #637168;
+		font-size: 13px;
 	}
 
-	.exercise-summary-btn {
-		border-width: 0;
-		background-color: transparent;
-		color: #25805d;
-		font-size: 9px;
-	}
-
-	.sets-header,
-	.set-row {
+	.summary-actions {
 		display: flex;
 		flex-direction: row;
-		align-items: center;
+		margin-top: 12px;
+	}
+
+	.summary-btn {
+		flex: 1;
+		height: 42px;
+		margin: 0 0 0 8px;
+		padding: 0;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #b9d9c9;
+		border-radius: 12px;
+		color: #25805d;
+		background-color: transparent;
+		font-size: 15px;
+	}
+
+	.summary-btn.primary {
+		margin-left: 0;
+		border-color: #1caf73;
+		color: #ffffff;
+		background-color: #1caf73;
+		font-weight: 700;
 	}
 
 	.sets-header {
-		padding: 0 5px 7px;
-		color: #969f9a;
-		font-size: 8px;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 8px;
 	}
 
-	.col-number,
-	.set-number {
-		width: 29px;
-		text-align: center;
+	.sets-title {
+		color: #526159;
+		font-size: 15px;
+		font-weight: 700;
 	}
 
-	.col-last,
-	.last-set {
-		flex: 1;
-		text-align: center;
-	}
-
-	.col-weight,
-	.col-reps {
-		width: 63px;
-		text-align: center;
-	}
-
-	.col-check {
-		width: 32px;
+	.rir-help-btn {
+		margin: 0;
+		padding: 6px 0 6px 12px;
+		border-width: 0;
+		color: #348365;
+		background-color: transparent;
+		font-size: 13px;
 	}
 
 	.sets-list {
@@ -515,71 +880,207 @@
 		flex-direction: column;
 	}
 
-	.set-row {
-		margin-bottom: 8px;
-		padding: 5px;
+	.set-card {
+		margin-bottom: 10px;
+		padding: 10px 12px 12px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #e7ebe8;
-		border-radius: 13px;
+		border-radius: 14px;
 		background-color: #ffffff;
 	}
 
-	.set-row.completed {
+	.set-card.warmup {
+		border-style: dashed;
+		border-color: #d3dad6;
+		background-color: #fbfcfb;
+	}
+
+	.set-card.completed {
 		background-color: #f1faf5;
 		border-color: #cdebdc;
 	}
 
-	.set-number {
+	.set-top {
 		display: flex;
+		flex-direction: row;
 		align-items: center;
-		justify-content: center;
-		height: 25px;
-		border-radius: 8px;
-		color: #526159;
-		background-color: #f0f3f1;
-		font-size: 10px;
-		font-weight: 700;
+		margin-bottom: 10px;
 	}
 
-	.set-row.completed .set-number {
+	.set-badge {
+		display: block;
+		min-width: 32px;
+		height: 32px;
+		margin-right: 8px;
+		padding: 0 6px;
+		border-radius: 9px;
+		color: #526159;
+		background-color: #f0f3f1;
+		font-size: 15px;
+		font-weight: 700;
+		text-align: center;
+		line-height: 32px;
+	}
+
+	.set-card.completed .set-badge {
 		color: #ffffff;
 		background-color: #28b77a;
 	}
 
-	.last-set {
-		color: #8d9691;
-		font-size: 9px;
+	.kind-switch {
+		display: flex;
+		flex-direction: row;
+		padding: 2px;
+		border-radius: 10px;
+		background-color: #eef1ef;
 	}
 
-	.set-input {
-		width: 63px;
-		height: 34px;
-		margin: 0 4px;
-		border-width: 1px;
-		border-style: solid;
-		border-color: #e5e9e7;
-		border-radius: 9px;
-		text-align: center;
-		font-size: 11px;
+	.kind-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 48px;
+		height: 30px;
+		margin: 0;
+		padding: 0;
+		border-width: 0;
+		border-radius: 8px;
+		color: #717c76;
+		background-color: transparent;
+		font-size: 13px;
+	}
+
+	.kind-btn.active {
+		color: #1f2a24;
+		background-color: #ffffff;
+		font-weight: 700;
+	}
+
+	.set-top-spacer {
+		flex: 1;
+	}
+
+	.set-delete {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+		margin: 0 4px 0 0;
+		padding: 0;
+		border-width: 0;
+		background-color: transparent;
 	}
 
 	.set-check {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 29px;
-		height: 29px;
+		width: 44px;
+		height: 44px;
+		margin: 0;
+		padding: 0;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #dce4df;
-		border-radius: 9px;
+		border-radius: 12px;
 		background-color: #f6f8f7;
 	}
 
-	.set-row.completed .set-check {
+	.set-check.checked {
 		background-color: #28b77a;
 		border-color: #28b77a;
+	}
+
+	.set-fields {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		height: 46px;
+		margin-right: 8px;
+		padding: 0 8px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e5e9e7;
+		border-radius: 10px;
+		background-color: #fbfcfb;
+	}
+
+	.field-weight {
+		flex: 13;
+	}
+
+	.field-reps {
+		flex: 10;
+	}
+
+	.field-input {
+		flex: 1;
+		min-width: 0;
+		height: 44px;
+		font-size: 17px;
+		text-align: center;
+	}
+
+	.field-unit {
+		margin-left: 2px;
+		color: #8d9691;
+		font-size: 12px;
+	}
+
+	.rir-field {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		flex: 10;
+		height: 46px;
+		margin: 0;
+		padding: 0;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e5e9e7;
+		border-radius: 10px;
+		background-color: #fbfcfb;
+	}
+
+	.rir-field.filled {
+		border-color: #cfd8d3;
+		background-color: #eef1ef;
+	}
+
+	.rir-caption {
+		color: #8d9691;
+		font-size: 11px;
+		line-height: 1.2;
+	}
+
+	.rir-value {
+		color: #1f2a24;
+		font-size: 15px;
+		font-weight: 700;
+		line-height: 1.3;
+	}
+
+	.set-last {
+		display: block;
+		margin-top: 8px;
+		color: #8d9691;
+		font-size: 12px;
+	}
+
+	.set-error {
+		display: block;
+		margin-top: 6px;
+		color: #d4493f;
+		font-size: 13px;
 	}
 
 	.add-set {
@@ -588,7 +1089,7 @@
 		align-items: center;
 		justify-content: center;
 		width: 100%;
-		margin-top: 11px;
+		margin-top: 4px;
 		padding: 10px;
 		border-width: 1px;
 		border-style: dashed;
@@ -596,17 +1097,23 @@
 		border-radius: 11px;
 		color: #348365;
 		background-color: transparent;
-		font-size: 10px;
+		font-size: 15px;
 	}
 
 	.rest-row {
 		display: flex;
-		flex-direction: row;
-		align-items: center;
+		flex-direction: column;
 		margin-top: 16px;
-		padding: 13px;
+		padding: 14px;
 		border-radius: 13px;
 		background-color: #edf2ef;
+	}
+
+	.rest-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
 	}
 
 	.rest-label {
@@ -614,33 +1121,91 @@
 		flex-direction: row;
 		align-items: center;
 		flex: 1;
+	}
+
+	.rest-label-text {
+		margin-left: 6px;
 		color: #637168;
-		font-size: 10px;
+		font-size: 15px;
+	}
+
+	.rest-adjust {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-top: 10px;
 	}
 
 	.rest-value {
-		margin-right: 8px;
-		font-size: 13px;
+		min-width: 110px;
+		color: #1f2a24;
+		font-size: 28px;
+		font-weight: 700;
+		text-align: center;
+	}
+
+	.rest-value.running {
+		color: #1db676;
+	}
+
+	.rest-step {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 44px;
+		height: 44px;
+		padding: 0;
+		border-width: 0;
+		border-radius: 22px;
+		color: #287b5a;
+		background-color: #ffffff;
+		font-size: 24px;
 	}
 
 	.rest-btn {
-		padding: 6px 8px;
+		margin: 0;
+		padding: 7px 14px;
 		border-width: 0;
-		border-radius: 7px;
+		border-radius: 9px;
 		color: #287b5a;
 		background-color: #ffffff;
-		font-size: 8px;
+		font-size: 14px;
+	}
+
+	.rest-btn.running {
+		color: #ffffff;
+		background-color: #e5564b;
+	}
+
+	.sheet-footer {
+		padding: 10px 0 12px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #eaeeeb;
+		background-color: #f8faf8;
 	}
 
 	.save-workout {
 		width: 100%;
-		margin-top: 14px;
 		padding: 15px;
 		border-width: 0;
 		border-radius: 14px;
 		color: #ffffff;
 		background-color: #1db676;
-		font-size: 12px;
+		font-size: 17px;
 		font-weight: 700;
+	}
+
+	.save-hint {
+		display: block;
+		margin-top: 8px;
+		color: #8d9691;
+		font-size: 12px;
+		text-align: center;
+	}
+
+	.safe-bottom {
+		height: env(safe-area-inset-bottom);
 	}
 </style>

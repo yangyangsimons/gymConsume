@@ -1,0 +1,534 @@
+<template>
+	<view class="ov-page">
+		<scroll-view class="ov-scroll" scroll-y="true">
+			<view class="ov-content" v-if="session != null">
+				<view class="ov-head">
+					<view class="ov-head-top">
+						<view class="ov-head-copy">
+							<text class="ov-kicker">{{ isFinished ? 'WORKOUT SUMMARY' : 'TODAY WORKOUT' }}</text>
+							<text class="ov-date">{{ dateLabel }}</text>
+						</view>
+						<text class="ov-tag" :class="{ done: isFinished }">{{ isFinished ? '已结束' : '进行中' }}</text>
+					</view>
+					<view class="ov-stats" v-if="isFinished">
+						<view class="ov-stat">
+							<text class="ov-stat-value">{{ totals.workDone }}</text>
+							<text class="ov-stat-label">完成正式组</text>
+						</view>
+						<view class="ov-stat">
+							<text class="ov-stat-value">{{ totals.exercisesWithDone }}</text>
+							<text class="ov-stat-label">有效动作</text>
+						</view>
+						<view class="ov-stat">
+							<text class="ov-stat-value">{{ totals.volume }}</text>
+							<text class="ov-stat-label">容量 kg</text>
+						</view>
+						<view class="ov-stat">
+							<text class="ov-stat-value">{{ minutes }}</text>
+							<text class="ov-stat-label">用时 分钟</text>
+						</view>
+					</view>
+					<text class="ov-sub" v-else>{{ totals.exercises }} 个动作 · 已完成 {{ totals.workDone }} 个正式组</text>
+				</view>
+
+				<view class="ov-note">
+					<text class="ov-note-text">{{ noteText }}</text>
+				</view>
+
+				<view class="ov-list">
+					<text class="ov-empty" v-if="cards.length === 0">还没有添加动作，点击下方“添加动作”开始。</text>
+					<view class="ov-card" v-for="card in cards" :key="card.id">
+						<view class="ov-card-top">
+							<view class="ov-card-copy">
+								<text class="ov-card-name">{{ card.name }}</text>
+								<text class="ov-card-target">{{ card.targetLabel }}</text>
+							</view>
+							<text class="ov-card-count">{{ card.workDone }}/{{ card.workTarget }}<text class="ov-card-count-unit"> 正式组</text></text>
+						</view>
+						<view class="ov-bar">
+							<view class="ov-bar-fill" :style="{ width: card.pct + '%' }"></view>
+						</view>
+						<view class="ov-card-bottom">
+							<text class="ov-card-detail">{{ card.detail }}</text>
+							<view class="ov-card-actions" v-if="!isFinished">
+								<button class="ov-link" @click="onEdit(card.index)">编辑</button>
+								<button class="ov-link danger" @click="onRemove(card.index)">删除</button>
+							</view>
+						</view>
+					</view>
+				</view>
+
+				<button class="ov-add" v-if="!isFinished" @click="onAdd">
+					<gym-icon name="plus-brand" :size="18"></gym-icon>
+					<text>添加动作</text>
+				</button>
+				<view class="ov-pad"></view>
+			</view>
+		</scroll-view>
+
+		<view class="ov-footer">
+			<view class="ov-footer-row" v-if="isFinished">
+				<button class="ov-secondary" v-if="session != null && session.cloudStatus === 'failed'" :disabled="syncing"
+					@click="onRetry">{{ syncing ? '提交中…' : '重试提交' }}</button>
+				<button class="ov-primary" @click="goHome">返回首页</button>
+			</view>
+			<button class="ov-primary" v-else :disabled="busy" @click="onFinish">结束训练</button>
+			<view class="ov-safe"></view>
+		</view>
+
+		<gym-workout-sheet v-if="sheetOpen" :edit-index="editIndex" @close="onSheetClose" @saved="onSheetSaved"></gym-workout-sheet>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { parseDate } from '@/services/gym-stats.uts'
+	import {
+		SessionTotals, WorkoutSession, durationMinutes, exerciseProgress, exerciseVolume, finishSession, formatTarget,
+		loadSession, saveSession, sessionTotals, startSession
+	} from '@/services/workout-session.uts'
+	import { syncSessionToCloud } from '@/services/workout-adapter.uts'
+	import { confirmDialog } from '@/services/gym-dialog.uts'
+
+	type ExerciseCard = {
+		index : number
+		id : string
+		name : string
+		targetLabel : string
+		workDone : number
+		workTarget : number
+		pct : number
+		detail : string
+	}
+
+	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
+
+	const session = ref<WorkoutSession | null>(null)
+	const sheetOpen = ref<boolean>(false)
+	const editIndex = ref<number>(-1)
+	const busy = ref<boolean>(false)
+	const syncing = ref<boolean>(false)
+
+	function reload() {
+		session.value = loadSession()
+	}
+
+	reload()
+	if (session.value == null) session.value = startSession()
+	// 上次离开时仍有未保存的动作编辑，自动恢复
+	if (session.value != null && session.value.status == 'active' && session.value.editing != null) {
+		sheetOpen.value = true
+	}
+
+	const isFinished = computed(() : boolean => session.value != null && session.value.status == 'finished')
+
+	const dateLabel = computed(() : string => {
+		if (session.value == null) return ''
+		const d = parseDate(session.value.date)
+		return (d.getMonth() + 1) + '月' + d.getDate() + '日 · 星期' + weekNames[d.getDay()]
+	})
+
+	const totals = computed(() : SessionTotals => {
+		if (session.value == null) return { exercises: 0, exercisesWithDone: 0, workDone: 0, warmupDone: 0, unfinished: 0, volume: 0 } as SessionTotals
+		return sessionTotals(session.value)
+	})
+
+	const minutes = computed(() : number => session.value == null ? 0 : durationMinutes(session.value))
+
+	const cards = computed(() : ExerciseCard[] => {
+		const out : ExerciseCard[] = []
+		const s = session.value
+		if (s == null) return out
+		for (let i = 0; i < s.exercises.length; i++) {
+			const ex = s.exercises[i]
+			const p = exerciseProgress(ex)
+			const parts : string[] = []
+			if (p.warmupTotal > 0) parts.push('热身 ' + p.warmupDone + '/' + p.warmupTotal)
+			if (p.unfinished > 0) parts.push(p.unfinished + ' 组未完成')
+			if (s.status == 'finished') parts.push('容量 ' + exerciseVolume(ex) + ' kg')
+			out.push({
+				index: i,
+				id: ex.id,
+				name: ex.name,
+				targetLabel: formatTarget(ex.target),
+				workDone: p.workDone,
+				workTarget: p.workTarget,
+				pct: p.workTarget > 0 ? Math.min(100, Math.round(p.workDone / p.workTarget * 100)) : 0,
+				detail: parts.length > 0 ? parts.join(' · ') : '全部组已完成'
+			} as ExerciseCard)
+		}
+		return out
+	})
+
+	const noteText = computed(() : string => {
+		const s = session.value
+		if (s == null) return ''
+		if (s.status == 'active') return '已自动保存到本机。结束训练后，才会把已完成的正式组提交到云端。'
+		if (s.cloudStatus == 'synced') return '已提交到云端：仅已完成正式组的重量与次数。热身组、RIR 和目标仅保存在本机。'
+		if (s.cloudStatus == 'failed') return '云端提交失败，训练记录仍保存在本机，可重试提交。'
+		if (s.cloudStatus == 'skipped') return '仅完成了热身组，不计入正式训练，也未提交到云端；记录已保存到本机。'
+		return '训练记录已保存到本机。'
+	})
+
+	function goHome() {
+		uni.switchTab({ url: '/pages/home/home' })
+	}
+
+	function onAdd() {
+		editIndex.value = -1
+		sheetOpen.value = true
+	}
+
+	function onEdit(index : number) {
+		editIndex.value = index
+		sheetOpen.value = true
+	}
+
+	async function onRemove(index : number) {
+		const s = session.value
+		if (s == null || index < 0 || index >= s.exercises.length) return
+		const ex = s.exercises[index]
+		const ok = await confirmDialog('删除动作', '将从本次训练中移除“' + ex.name + '”及其所有组记录。', '删除', '取消')
+		if (!ok) return
+		s.exercises.splice(index, 1)
+		if (!saveSession(s)) uni.showToast({ title: '本机保存失败，请重试', icon: 'none' })
+		reload()
+	}
+
+	function onSheetClose() {
+		sheetOpen.value = false
+		reload()
+	}
+
+	function onSheetSaved() {
+		sheetOpen.value = false
+		reload()
+	}
+
+	async function runSync(s : WorkoutSession) {
+		syncing.value = true
+		try {
+			await syncSessionToCloud(s)
+		} catch (e) {
+			s.cloudStatus = 'failed'
+			saveSession(s)
+		}
+		syncing.value = false
+		reload()
+	}
+
+	async function onFinish() {
+		const s = session.value
+		if (s == null || busy.value || s.status != 'active') return
+		const t = sessionTotals(s)
+		if (t.workDone + t.warmupDone == 0) {
+			const ok = await confirmDialog('没有完成的组', '还没有完成任何一组，结束后不会产生训练记录，已填写的内容也会被清除。', '结束', '返回继续')
+			if (!ok) return
+			finishSession(s)
+			uni.switchTab({
+				url: '/pages/home/home',
+				success: () => {
+					uni.showToast({ title: '没有完成的组，未产生训练记录', icon: 'none' })
+				}
+			})
+			return
+		}
+		let content = '本次共完成 ' + t.workDone + ' 个正式组。'
+		if (t.unfinished > 0) content = '还有 ' + t.unfinished + ' 个组未完成，结束后不会计入统计，也不会被自动标记为完成。'
+		const ok = await confirmDialog('结束本次训练？', content, '结束训练', '返回继续')
+		if (!ok) return
+		busy.value = true
+		finishSession(s)
+		reload()
+		if (s.cloudStatus == 'pending') await runSync(s)
+		busy.value = false
+	}
+
+	async function onRetry() {
+		const s = session.value
+		if (s == null || syncing.value) return
+		await runSync(s)
+	}
+</script>
+
+<style lang="scss">
+	.ov-page {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		width: 100%;
+		height: 100%;
+		background-color: #f6f8f6;
+		font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+	}
+
+	.ov-scroll {
+		flex: 1;
+		height: 0;
+	}
+
+	.ov-content {
+		padding: 16px 20px 0;
+	}
+
+	.ov-head {
+		padding: 18px;
+		border-radius: 22px;
+		background-color: #1f4433;
+	}
+
+	.ov-head-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.ov-head-copy {
+		flex: 1;
+		margin-right: 10px;
+	}
+
+	.ov-kicker {
+		display: block;
+		margin-bottom: 6px;
+		color: #9fc4b1;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.ov-date {
+		display: block;
+		color: #ffffff;
+		font-size: 22px;
+		font-weight: 600;
+	}
+
+	.ov-tag {
+		padding: 5px 11px;
+		border-radius: 10px;
+		color: #c9f6df;
+		background-color: #ffffff20;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.ov-tag.done {
+		color: #1f4433;
+		background-color: #70e6ad;
+	}
+
+	.ov-sub {
+		display: block;
+		margin-top: 12px;
+		color: #bdd3c8;
+		font-size: 14px;
+	}
+
+	.ov-stats {
+		display: flex;
+		flex-direction: row;
+		margin-top: 16px;
+	}
+
+	.ov-stat {
+		flex: 1;
+	}
+
+	.ov-stat-value {
+		display: block;
+		color: #70e6ad;
+		font-size: 22px;
+		font-weight: 700;
+	}
+
+	.ov-stat-label {
+		display: block;
+		margin-top: 4px;
+		color: #bdd3c8;
+		font-size: 11px;
+	}
+
+	.ov-note {
+		margin-top: 12px;
+		padding: 10px 12px;
+		border-radius: 12px;
+		background-color: #edf2ef;
+	}
+
+	.ov-note-text {
+		display: block;
+		color: #637168;
+		font-size: 12px;
+		line-height: 1.6;
+	}
+
+	.ov-list {
+		margin-top: 16px;
+	}
+
+	.ov-empty {
+		display: block;
+		padding: 28px 0;
+		color: #949d98;
+		font-size: 14px;
+		text-align: center;
+	}
+
+	.ov-card {
+		margin-bottom: 12px;
+		padding: 16px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e9edea;
+		border-radius: 18px;
+		background-color: #ffffff;
+	}
+
+	.ov-card-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.ov-card-copy {
+		flex: 1;
+		margin-right: 12px;
+	}
+
+	.ov-card-name {
+		display: block;
+		color: #1f2a24;
+		font-size: 17px;
+		font-weight: 700;
+		line-height: 1.35;
+	}
+
+	.ov-card-target {
+		display: block;
+		margin-top: 4px;
+		color: #7d8982;
+		font-size: 12px;
+	}
+
+	.ov-card-count {
+		color: #159b65;
+		font-size: 22px;
+		font-weight: 700;
+		white-space: nowrap;
+	}
+
+	.ov-card-count-unit {
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 400;
+	}
+
+	.ov-bar {
+		height: 6px;
+		margin: 12px 0 10px;
+		border-radius: 3px;
+		background-color: #eaf0ec;
+	}
+
+	.ov-bar-fill {
+		height: 6px;
+		border-radius: 3px;
+		background-color: #28b77a;
+	}
+
+	.ov-card-bottom {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.ov-card-detail {
+		flex: 1;
+		margin-right: 8px;
+		color: #8d9691;
+		font-size: 12px;
+	}
+
+	.ov-card-actions {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.ov-link {
+		margin: 0;
+		padding: 8px 12px;
+		border-width: 0;
+		color: #25805d;
+		background-color: transparent;
+		font-size: 14px;
+	}
+
+	.ov-link.danger {
+		color: #d4493f;
+	}
+
+	.ov-add {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		margin-top: 4px;
+		padding: 12px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #c4cec8;
+		border-radius: 14px;
+		color: #348365;
+		background-color: transparent;
+		font-size: 16px;
+	}
+
+	.ov-pad {
+		height: 24px;
+	}
+
+	.ov-footer {
+		padding: 10px 20px 12px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #e9edea;
+		background-color: #ffffff;
+	}
+
+	.ov-footer-row {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.ov-primary {
+		flex: 1;
+		margin: 0;
+		padding: 15px;
+		border-width: 0;
+		border-radius: 14px;
+		color: #ffffff;
+		background-color: #1db676;
+		font-size: 17px;
+		font-weight: 700;
+	}
+
+	.ov-secondary {
+		flex: 1;
+		margin: 0 10px 0 0;
+		padding: 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #1caf73;
+		border-radius: 14px;
+		color: #25805d;
+		background-color: transparent;
+		font-size: 16px;
+	}
+
+	.ov-safe {
+		height: env(safe-area-inset-bottom);
+	}
+</style>

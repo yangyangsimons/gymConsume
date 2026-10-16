@@ -1,0 +1,461 @@
+import { Exercise, formatDate, round1 } from './gym-stats.uts'
+
+// 本机训练会话：所有“目标 / 组类型 / 实际 RIR / 完成状态”仅保存在本机，字段含义见 docs/workout-session-phase1.md
+export const SESSION_VERSION = 1
+const SESSION_KEY = 'gymConsume.workoutSession.v1'
+const HISTORY_KEY = 'gymConsume.workoutSessionHistory.v1'
+const HISTORY_LIMIT = 30
+const MAX_DURATION_MIN = 240
+
+export const KIND_WORK = 'work'
+export const KIND_WARMUP = 'warmup'
+
+// 实际 RIR 取值：'' 未填写 | '0'~'4' | '5+' | 'unsure'
+export const RIR_UNSET = ''
+export const RIR_FIVE_PLUS = '5+'
+export const RIR_UNSURE = 'unsure'
+
+export type SetEntry = {
+	id : string
+	kind : string
+	weight : string
+	reps : string
+	rir : string
+	done : boolean
+}
+
+export type ExerciseTarget = {
+	workSets : number
+	repsMin : number
+	repsMax : number
+	rirEnabled : boolean
+	rirMin : number
+	rirMax : number
+	restSeconds : number
+}
+
+export type SessionExercise = {
+	id : string
+	exerciseId : string
+	name : string
+	category : string
+	weightRequired : boolean
+	target : ExerciseTarget
+	sets : SetEntry[]
+	cloudSynced : boolean
+}
+
+export type EditingDraft = {
+	index : number
+	baseline : string
+	exercise : SessionExercise
+}
+
+export type WorkoutSession = {
+	version : number
+	id : string
+	date : string
+	startedAt : number
+	updatedAt : number
+	finishedAt : number
+	// active | finished
+	status : string
+	exercises : SessionExercise[]
+	editing : EditingDraft | null
+	// none | pending | synced | failed | skipped
+	cloudStatus : string
+	durationSent : boolean
+}
+
+export type ExerciseProgress = {
+	workDone : number
+	workTarget : number
+	warmupDone : number
+	warmupTotal : number
+	unfinished : number
+}
+
+export type SessionTotals = {
+	exercises : number
+	exercisesWithDone : number
+	workDone : number
+	warmupDone : number
+	unfinished : number
+	volume : number
+}
+
+export type TargetForm = {
+	workSets : string
+	repsMin : string
+	repsMax : string
+	rirEnabled : boolean
+	rirMin : string
+	rirMax : string
+	restSeconds : string
+}
+
+export type TargetErrors = {
+	workSets : string
+	reps : string
+	rir : string
+	rest : string
+}
+
+let idSeq = 0
+
+export function genId(prefix : string) : string {
+	idSeq++
+	return prefix + '_' + Date.now().toString(36) + '_' + idSeq + '_' + Math.floor(Math.random() * 46656).toString(36)
+}
+
+function str(v : any | null) : string {
+	return v == null ? '' : '' + v
+}
+
+// 缺少组类型的记录一律按正式组读取，不改写原始数据
+export function normalizeKind(raw : any | null) : string {
+	return raw == KIND_WARMUP ? KIND_WARMUP : KIND_WORK
+}
+
+export function normalizeRir(raw : any | null) : string {
+	const v = str(raw)
+	if (v == '0' || v == '1' || v == '2' || v == '3' || v == '4' || v == RIR_FIVE_PLUS || v == RIR_UNSURE) return v
+	return RIR_UNSET
+}
+
+export function rirLabel(code : string, unset : string) : string {
+	if (code == RIR_UNSET) return unset
+	if (code == RIR_UNSURE) return '不确定'
+	return code
+}
+
+// 核心类与自重动作允许不填重量
+const BODYWEIGHT_IDS : string[] = ['back-01', 'chest-04', 'core-01', 'core-02']
+
+export function isWeightRequired(exerciseId : string, category : string) : boolean {
+	if (category == '核心') return false
+	return !BODYWEIGHT_IDS.includes(exerciseId)
+}
+
+export function defaultTarget() : ExerciseTarget {
+	return {
+		workSets: 3,
+		repsMin: 8,
+		repsMax: 12,
+		rirEnabled: true,
+		rirMin: 1,
+		rirMax: 3,
+		restSeconds: 90
+	} as ExerciseTarget
+}
+
+export function formatTarget(t : ExerciseTarget) : string {
+	const reps = t.repsMin == t.repsMax ? '' + t.repsMin : t.repsMin + '–' + t.repsMax
+	let text = '目标 ' + t.workSets + ' 组 × ' + reps + ' 次'
+	if (t.rirEnabled) {
+		text += ' · 目标 RIR ' + (t.rirMin == t.rirMax ? '' + t.rirMin : t.rirMin + '–' + t.rirMax)
+	}
+	return text
+}
+
+export function newSet(kind : string) : SetEntry {
+	return { id: genId('set'), kind: kind, weight: '', reps: '', rir: RIR_UNSET, done: false } as SetEntry
+}
+
+export function newSessionExercise(ex : Exercise) : SessionExercise {
+	const target = defaultTarget()
+	const sets : SetEntry[] = []
+	for (let i = 0; i < target.workSets; i++) sets.push(newSet(KIND_WORK))
+	return {
+		id: genId('ex'),
+		exerciseId: ex._id,
+		name: ex.name,
+		category: ex.category,
+		weightRequired: isWeightRequired(ex._id, ex.category),
+		target: target,
+		sets: sets,
+		cloudSynced: false
+	} as SessionExercise
+}
+
+export function cloneExercise(ex : SessionExercise) : SessionExercise {
+	return JSON.parse(JSON.stringify(ex)) as SessionExercise
+}
+
+export function targetToForm(t : ExerciseTarget) : TargetForm {
+	return {
+		workSets: '' + t.workSets,
+		repsMin: '' + t.repsMin,
+		repsMax: '' + t.repsMax,
+		rirEnabled: t.rirEnabled,
+		rirMin: '' + t.rirMin,
+		rirMax: '' + t.rirMax,
+		restSeconds: '' + t.restSeconds
+	} as TargetForm
+}
+
+function isDigits(s : string) : boolean {
+	if (s.length == 0) return false
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i)
+		if (c < 48 || c > 57) return false
+	}
+	return true
+}
+
+// 允许最多一个小数点的非负十进制文本
+function isDecimalText(s : string) : boolean {
+	let dots = 0
+	let digits = 0
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i)
+		if (c == 46) dots++
+		else if (c >= 48 && c <= 57) digits++
+		else return false
+	}
+	return dots <= 1 && digits > 0
+}
+
+function intInRange(text : string, min : number, max : number) : boolean {
+	const s = text.trim()
+	if (!isDigits(s)) return false
+	const n = parseInt(s)
+	return n >= min && n <= max
+}
+
+export function validateTargetForm(f : TargetForm) : TargetErrors {
+	const errors = { workSets: '', reps: '', rir: '', rest: '' } as TargetErrors
+	if (!intInRange(f.workSets, 1, 20)) errors.workSets = '正式组数请填写 1–20 的整数'
+	if (!intInRange(f.repsMin, 1, 100) || !intInRange(f.repsMax, 1, 100)) {
+		errors.reps = '次数请填写 1–100 的整数'
+	} else if (parseInt(f.repsMin) > parseInt(f.repsMax)) {
+		errors.reps = '最少次数不能大于最多次数'
+	}
+	if (f.rirEnabled) {
+		if (!intInRange(f.rirMin, 0, 5) || !intInRange(f.rirMax, 0, 5)) {
+			errors.rir = '目标 RIR 请填写 0–5 的整数'
+		} else if (parseInt(f.rirMin) > parseInt(f.rirMax)) {
+			errors.rir = 'RIR 下限不能大于上限'
+		}
+	}
+	if (!intInRange(f.restSeconds, 15, 600)) errors.rest = '休息时间请填写 15–600 秒'
+	return errors
+}
+
+export function hasTargetError(e : TargetErrors) : boolean {
+	return e.workSets != '' || e.reps != '' || e.rir != '' || e.rest != ''
+}
+
+// 仅在 validateTargetForm 通过后调用
+export function formToTarget(f : TargetForm) : ExerciseTarget {
+	return {
+		workSets: parseInt(f.workSets.trim()),
+		repsMin: parseInt(f.repsMin.trim()),
+		repsMax: parseInt(f.repsMax.trim()),
+		rirEnabled: f.rirEnabled,
+		rirMin: f.rirEnabled ? parseInt(f.rirMin.trim()) : 0,
+		rirMax: f.rirEnabled ? parseInt(f.rirMax.trim()) : 0,
+		restSeconds: parseInt(f.restSeconds.trim())
+	} as ExerciseTarget
+}
+
+export function parseWeight(text : string) : number {
+	const s = text.trim()
+	return s == '' ? 0 : parseFloat(s)
+}
+
+export function hasInput(set : SetEntry) : boolean {
+	return set.weight.trim() != '' || set.reps.trim() != '' || set.rir != RIR_UNSET || set.done
+}
+
+// 返回空字符串表示该组可以标记完成。RIR 为选填，不参与校验
+export function validateSet(set : SetEntry, weightRequired : boolean) : string {
+	const w = set.weight.trim()
+	if (w == '') {
+		if (weightRequired) return '请填写重量'
+	} else {
+		if (!isDecimalText(w)) return '重量格式不正确'
+		const n = parseFloat(w)
+		if (Math.round(n * 100) / 100 != n) return '重量最多保留 2 位小数'
+		if (n > 1000) return '重量不能超过 1000 kg'
+		if (weightRequired && n <= 0) return '重量需大于 0'
+	}
+	const r = set.reps.trim()
+	if (r == '') return '请填写次数'
+	if (!isDigits(r)) return '次数需为整数'
+	const reps = parseInt(r)
+	if (reps < 1) return '次数需大于 0'
+	if (reps > 200) return '次数不能超过 200'
+	return ''
+}
+
+// 只有已完成且数据合法的组才计入统计
+export function isCountedSet(set : SetEntry, weightRequired : boolean) : boolean {
+	return set.done && validateSet(set, weightRequired) == ''
+}
+
+export function exerciseProgress(ex : SessionExercise) : ExerciseProgress {
+	const p = { workDone: 0, workTarget: ex.target.workSets, warmupDone: 0, warmupTotal: 0, unfinished: 0 } as ExerciseProgress
+	for (let i = 0; i < ex.sets.length; i++) {
+		const s = ex.sets[i]
+		const counted = isCountedSet(s, ex.weightRequired)
+		if (s.kind == KIND_WARMUP) {
+			p.warmupTotal++
+			if (counted) p.warmupDone++
+		} else if (counted) {
+			p.workDone++
+		}
+		if (!counted) p.unfinished++
+	}
+	return p
+}
+
+export function sessionTotals(session : WorkoutSession) : SessionTotals {
+	const t = { exercises: session.exercises.length, exercisesWithDone: 0, workDone: 0, warmupDone: 0, unfinished: 0, volume: 0 } as SessionTotals
+	for (let i = 0; i < session.exercises.length; i++) {
+		const ex = session.exercises[i]
+		const p = exerciseProgress(ex)
+		t.workDone += p.workDone
+		t.warmupDone += p.warmupDone
+		t.unfinished += p.unfinished
+		if (p.workDone > 0) t.exercisesWithDone++
+		t.volume += exerciseVolume(ex)
+	}
+	t.volume = round1(t.volume)
+	return t
+}
+
+// 容量只统计已完成的正式组
+export function exerciseVolume(ex : SessionExercise) : number {
+	let v = 0
+	for (let i = 0; i < ex.sets.length; i++) {
+		const s = ex.sets[i]
+		if (s.kind == KIND_WARMUP || !isCountedSet(s, ex.weightRequired)) continue
+		v += parseWeight(s.weight) * parseInt(s.reps)
+	}
+	return round1(v)
+}
+
+export function durationMinutes(session : WorkoutSession) : number {
+	const end = session.finishedAt > 0 ? session.finishedAt : Date.now()
+	return Math.min(MAX_DURATION_MIN, Math.max(1, Math.round((end - session.startedAt) / 60000)))
+}
+
+function readJson(key : string) : any | null {
+	try {
+		const raw = uni.getStorageSync(key)
+		if (raw == null || raw == '') return null
+		if (typeof raw == 'string') return JSON.parse(raw)
+		return raw
+	} catch (e) {
+		return null
+	}
+}
+
+function writeJson(key : string, value : any) : boolean {
+	try {
+		uni.setStorageSync(key, JSON.stringify(value))
+		return true
+	} catch (e) {
+		return false
+	}
+}
+
+function repairExercise(ex : SessionExercise) {
+	if (ex.target == null) ex.target = defaultTarget()
+	if (ex.sets == null) ex.sets = []
+	for (let i = 0; i < ex.sets.length; i++) {
+		const s = ex.sets[i]
+		if (str(s.id) == '') s.id = genId('set')
+		s.kind = normalizeKind(s.kind)
+		s.weight = str(s.weight)
+		s.reps = str(s.reps)
+		s.rir = normalizeRir(s.rir)
+		s.done = s.done == true
+	}
+}
+
+function repairSession(s : WorkoutSession) : WorkoutSession {
+	for (let i = 0; i < s.exercises.length; i++) repairExercise(s.exercises[i])
+	if (s.editing != null) {
+		if (s.editing.exercise == null) s.editing = null
+		else repairExercise(s.editing.exercise)
+	}
+	return s
+}
+
+// 版本不匹配时返回 null 且不会删除原数据
+export function loadSession() : WorkoutSession | null {
+	const raw = readJson(SESSION_KEY)
+	if (raw == null) return null
+	const s = raw as WorkoutSession
+	if (s.version != SESSION_VERSION || s.exercises == null) return null
+	return repairSession(s)
+}
+
+export function saveSession(s : WorkoutSession) : boolean {
+	s.updatedAt = Date.now()
+	return writeJson(SESSION_KEY, s)
+}
+
+export function clearSession() {
+	try {
+		uni.removeStorageSync(SESSION_KEY)
+	} catch (e) { }
+}
+
+// none | active | finished | finished-failed
+export function peekSessionStatus() : string {
+	const s = loadSession()
+	if (s == null) return 'none'
+	if (s.status == 'active') return 'active'
+	return s.cloudStatus == 'failed' ? 'finished-failed' : 'finished'
+}
+
+function archiveSession(s : WorkoutSession) {
+	const raw = readJson(HISTORY_KEY)
+	const list : WorkoutSession[] = raw == null ? [] : (raw as WorkoutSession[])
+	list.unshift(s)
+	while (list.length > HISTORY_LIMIT) list.pop()
+	writeJson(HISTORY_KEY, list)
+}
+
+// 继续进行中的训练；上一场已结束则先移入本机历史再新建
+export function startSession() : WorkoutSession {
+	const cur = loadSession()
+	if (cur != null) {
+		if (cur.status == 'active') return cur
+		archiveSession(cur)
+	}
+	const now = Date.now()
+	const s = {
+		version: SESSION_VERSION,
+		id: genId('ws'),
+		date: formatDate(new Date()),
+		startedAt: now,
+		updatedAt: now,
+		finishedAt: 0,
+		status: 'active',
+		exercises: [],
+		editing: null,
+		cloudStatus: 'none',
+		durationSent: false
+	} as WorkoutSession
+	saveSession(s)
+	return s
+}
+
+// 结束整场训练，返回 'empty' | 'recorded'。没有任何已完成的组时直接丢弃，不产生记录
+export function finishSession(s : WorkoutSession) : string {
+	const t = sessionTotals(s)
+	if (t.workDone + t.warmupDone == 0) {
+		clearSession()
+		return 'empty'
+	}
+	s.status = 'finished'
+	s.finishedAt = Date.now()
+	s.editing = null
+	s.cloudStatus = t.workDone > 0 ? 'pending' : 'skipped'
+	saveSession(s)
+	return 'recorded'
+}
