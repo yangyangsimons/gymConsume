@@ -1,12 +1,14 @@
 <template>
 	<view class="app-shell">
-		<scroll-view class="app-content" scroll-y="true">
-			<gym-analytics></gym-analytics>
-		</scroll-view>
+		<gym-analytics></gym-analytics>
 	</view>
 </template>
 
 <script setup lang="uts">
+	// 从其他页面返回（例如刚结束一场训练）时刷新本机训练状态
+	onShow(() => {
+		uni.$emit('workout-session-changed')
+	})
 </script>
 
 <style lang="scss">

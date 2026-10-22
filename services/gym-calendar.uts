@@ -1,0 +1,334 @@
+import { Workout, addDays, formatDate, parseDate, round1, setVolume, weekdayIndex } from './gym-stats.uts'
+import { KIND_WARMUP, WorkoutSession, durationMinutes, exerciseProgress, isCountedSet, parseWeight, sessionTotals } from './workout-session.uts'
+
+// 首页周目标 / 训练日历 / 日详情共用的日期与统计口径，说明见 docs/workout-session-phase1.md 的“统计口径”。
+// 日期一律是用户本地自然日的 YYYY-MM-DD 字符串，周一至周日为一周；不做 UTC 转换。
+
+export const SOURCE_CLOUD = 'cloud'
+export const SOURCE_LOCAL = 'local'
+export const STATUS_ACTIVE = 'active'
+export const STATUS_FINISHED = 'finished'
+
+export type SetRecord = {
+	weight : number
+	reps : number
+}
+
+export type ExerciseSummary = {
+	// 动作库 ID；旧数据缺失时为空串，不按名称猜测
+	exerciseId : string
+	name : string
+	category : string
+	workSets : number
+	volume : number
+	sets : string[]
+	// 已完成的正式组（不含热身组、未完成组），趋势统计的唯一数据来源
+	records : SetRecord[]
+}
+
+// 某一天的一条训练记录：云端按天合并的记录，或本机的一场训练（进行中 / 未同步 / 仅热身）
+export type DayEntry = {
+	key : string
+	date : string
+	// cloud | local
+	source : string
+	// active | finished
+	status : string
+	// synced | pending | failed | skipped | none（none 即进行中）
+	syncState : string
+	exercises : ExerciseSummary[]
+	workSets : number
+	volume : number
+	durationMin : number
+	// 已结束且至少有一个已完成正式组，才计入训练天数与周目标
+	counted : boolean
+	// 本机训练的结束（进行中为开始）时间戳；云端记录按天合并，没有时间，为 0
+	at : number
+	order : number
+}
+
+export type WeekProgress = {
+	weekStart : string
+	weekEnd : string
+	trainedDays : number
+	goal : number
+	// 已达标后为 0，不出现负数
+	remaining : number
+	// 超出目标的天数
+	extra : number
+	met : boolean
+}
+
+export type CalendarCell = {
+	date : string
+	day : number
+	inMonth : boolean
+	today : boolean
+	selected : boolean
+	trained : boolean
+	active : boolean
+	future : boolean
+}
+
+export type MonthRef = {
+	year : number
+	month : number
+}
+
+function setLabel(weight : number, reps : number) : string {
+	return weight > 0 ? weight + ' kg × ' + reps : reps + ' 次'
+}
+
+function cleanId(v : any | null) : string {
+	return v == null ? '' : ('' + v).trim()
+}
+
+export function entryFromWorkout(w : Workout) : DayEntry {
+	const exercises : ExerciseSummary[] = []
+	let workSets = 0
+	for (let i = 0; i < w.exercises.length; i++) {
+		const log = w.exercises[i]
+		const labels : string[] = []
+		const records : SetRecord[] = []
+		for (let j = 0; j < log.sets.length; j++) {
+			const s = log.sets[j]
+			if (!s.done) continue
+			labels.push(setLabel(s.weight, s.reps))
+			records.push({ weight: s.weight, reps: s.reps } as SetRecord)
+		}
+		if (labels.length == 0) continue
+		workSets += labels.length
+		exercises.push({ exerciseId: cleanId(log.exerciseId), name: log.name, category: log.category, workSets: labels.length, volume: round1(setVolume(log.sets)), sets: labels, records: records } as ExerciseSummary)
+	}
+	// 只有汇总字段的旧记录：仍计入训练天，但没有动作明细
+	if (exercises.length == 0 && w.totalSets > 0) workSets = w.totalSets
+	return {
+		key: 'cloud:' + w._id,
+		date: w.date,
+		source: SOURCE_CLOUD,
+		status: STATUS_FINISHED,
+		syncState: 'synced',
+		exercises: exercises,
+		workSets: workSets,
+		volume: w.totalVolume > 0 ? round1(w.totalVolume) : 0,
+		durationMin: w.durationMin > 0 ? w.durationMin : 0,
+		counted: workSets > 0,
+		at: 0,
+		order: 2
+	} as DayEntry
+}
+
+export function entryFromSession(s : WorkoutSession) : DayEntry {
+	const exercises : ExerciseSummary[] = []
+	for (let i = 0; i < s.exercises.length; i++) {
+		const ex = s.exercises[i]
+		const labels : string[] = []
+		const records : SetRecord[] = []
+		let volume = 0
+		let workDone = 0
+		for (let j = 0; j < ex.sets.length; j++) {
+			const set = ex.sets[j]
+			if (!isCountedSet(set, ex.weightRequired)) continue
+			const weight = parseWeight(set.weight)
+			const reps = parseInt(set.reps)
+			const warm = set.kind == KIND_WARMUP
+			labels.push((warm ? '热身 ' : '') + setLabel(weight, reps))
+			if (!warm) {
+				workDone++
+				volume += weight * reps
+				records.push({ weight: weight, reps: reps } as SetRecord)
+			}
+		}
+		if (labels.length == 0) continue
+		exercises.push({ exerciseId: cleanId(ex.exerciseId), name: ex.name, category: ex.category, workSets: workDone, volume: round1(volume), sets: labels, records: records } as ExerciseSummary)
+	}
+	const totals = sessionTotals(s)
+	const finished = s.status == STATUS_FINISHED
+	return {
+		key: 'local:' + s.id,
+		date: s.date,
+		source: s.cloudStatus == 'synced' && !s.durationSent ? SOURCE_CLOUD : SOURCE_LOCAL,
+		status: finished ? STATUS_FINISHED : STATUS_ACTIVE,
+		syncState: s.cloudStatus,
+		exercises: exercises,
+		workSets: totals.workDone,
+		volume: totals.volume,
+		durationMin: durationMinutes(s),
+		counted: finished && totals.workDone > 0,
+		at: finished ? s.finishedAt : s.startedAt,
+		order: finished ? 1 : 0
+	} as DayEntry
+}
+
+// 合并云端记录与本机训练。
+// - 云端记录每天一条（同一天多场训练在云端已被合并）。
+// - 本机已同步成功的训练已包含在云端记录里，云端加载成功时不重复展示。
+// - 本机进行中、待提交 / 提交失败、仅热身的训练单独列出。
+// 结果按日期倒序，同一天内：进行中 → 本机 → 云端。
+export function buildDayEntries(workouts : Workout[], sessions : WorkoutSession[], cloudLoaded : boolean) : DayEntry[] {
+	const out : DayEntry[] = []
+	for (let i = 0; i < workouts.length; i++) {
+		const e = entryFromWorkout(workouts[i])
+		if (e.counted) out.push(e)
+	}
+	const seen : string[] = []
+	for (let i = 0; i < sessions.length; i++) {
+		const s = sessions[i]
+		if (seen.includes(s.id)) continue
+		seen.push(s.id)
+		if (s.status != STATUS_ACTIVE && s.status != STATUS_FINISHED) continue
+		const finished = s.status == STATUS_FINISHED
+		if (finished && s.cloudStatus == 'synced' && s.durationSent && cloudLoaded) continue
+		const e = entryFromSession(s)
+		if (finished && e.exercises.length == 0) continue
+		out.push(e)
+	}
+	out.sort((a : DayEntry, b : DayEntry) : number => {
+		if (a.date != b.date) return a.date < b.date ? 1 : -1
+		return a.order - b.order
+	})
+	return out
+}
+
+export function entriesOnDate(entries : DayEntry[], date : string) : DayEntry[] {
+	return entries.filter((e : DayEntry) : boolean => e.date == date)
+}
+
+// 计入训练天的日期 → 当天已完成正式组数；与周目标、月统计、连续天数共用
+export function trainedDaysMap(entries : DayEntry[]) : Map<string, number> {
+	const map = new Map<string, number>()
+	for (let i = 0; i < entries.length; i++) {
+		const e = entries[i]
+		if (!e.counted) continue
+		map.set(e.date, (map.get(e.date) ?? 0) + e.workSets)
+	}
+	return map
+}
+
+export function activeDates(entries : DayEntry[]) : string[] {
+	const out : string[] = []
+	for (let i = 0; i < entries.length; i++) {
+		if (entries[i].status == STATUS_ACTIVE && !out.includes(entries[i].date)) out.push(entries[i].date)
+	}
+	return out
+}
+
+export function weekStartOf(date : string) : string {
+	const d = parseDate(date)
+	return formatDate(addDays(d, -weekdayIndex(d)))
+}
+
+export function weekEndOf(date : string) : string {
+	return formatDate(addDays(parseDate(weekStartOf(date)), 6))
+}
+
+export function addDaysStr(date : string, n : number) : string {
+	return formatDate(addDays(parseDate(date), n))
+}
+
+export function nextWeekStart(date : string) : string {
+	return addDaysStr(weekStartOf(date), 7)
+}
+
+export function countTrainedDays(trained : Map<string, number>, from : string, to : string) : number {
+	let n = 0
+	let cursor = from
+	while (cursor <= to) {
+		if (trained.has(cursor)) n++
+		cursor = addDaysStr(cursor, 1)
+	}
+	return n
+}
+
+export function calcWeekProgress(trained : Map<string, number>, today : string, goal : number) : WeekProgress {
+	const weekStart = weekStartOf(today)
+	const weekEnd = weekEndOf(today)
+	const days = countTrainedDays(trained, weekStart, weekEnd)
+	return {
+		weekStart: weekStart,
+		weekEnd: weekEnd,
+		trainedDays: days,
+		goal: goal,
+		remaining: Math.max(0, goal - days),
+		extra: Math.max(0, days - goal),
+		met: days >= goal
+	} as WeekProgress
+}
+
+export function weekVolume(entries : DayEntry[], weekStart : string) : number {
+	const weekEnd = addDaysStr(weekStart, 6)
+	let v = 0
+	for (let i = 0; i < entries.length; i++) {
+		const e = entries[i]
+		if (e.counted && e.date >= weekStart && e.date <= weekEnd) v += e.volume
+	}
+	return Math.round(v)
+}
+
+export function shiftMonth(year : number, month : number, delta : number) : MonthRef {
+	const d = new Date(year, month + delta, 1)
+	return { year: d.getFullYear(), month: d.getMonth() } as MonthRef
+}
+
+export function monthTrainedDays(trained : Map<string, number>, year : number, month : number) : number {
+	const dim = new Date(year, month + 1, 0).getDate()
+	let n = 0
+	for (let day = 1; day <= dim; day++) {
+		if (trained.has(formatDate(new Date(year, month, day)))) n++
+	}
+	return n
+}
+
+// month 为 0 基；网格从周一开始，5 或 6 行
+export function buildMonthCells(year : number, month : number, today : string, selected : string, trained : Map<string, number>, active : string[]) : CalendarCell[] {
+	const first = new Date(year, month, 1)
+	const lead = weekdayIndex(first)
+	const dim = new Date(year, month + 1, 0).getDate()
+	const total = lead + dim <= 35 ? 35 : 42
+	const cells : CalendarCell[] = []
+	for (let i = 0; i < total; i++) {
+		const d = new Date(year, month, 1 - lead + i)
+		const key = formatDate(d)
+		const inMonth = d.getMonth() == month
+		cells.push({
+			date: key,
+			day: d.getDate(),
+			inMonth: inMonth,
+			today: key == today,
+			selected: key == selected,
+			trained: trained.has(key),
+			active: active.includes(key),
+			future: key > today
+		} as CalendarCell)
+	}
+	return cells
+}
+
+export function entryTitle(e : DayEntry) : string {
+	const cats : string[] = []
+	for (let i = 0; i < e.exercises.length; i++) {
+		if (!cats.includes(e.exercises[i].category)) cats.push(e.exercises[i].category)
+	}
+	if (cats.length > 0) return cats.join('/') + '训练'
+	return e.status == STATUS_ACTIVE ? '进行中的训练' : '训练'
+}
+
+export function entryTag(e : DayEntry) : string {
+	if (e.status == STATUS_ACTIVE) return '进行中'
+	if (e.source == SOURCE_LOCAL) {
+		if (e.syncState == 'failed') return '提交失败'
+		if (e.syncState == 'pending') return '待提交'
+		if (e.syncState == 'skipped') return '仅热身'
+	}
+	return '已完成'
+}
+
+// 数据来源说明：本机记录不能假装已同步云端
+export function entryNote(e : DayEntry) : string {
+	if (e.status == STATUS_ACTIVE) return '尚未结束，不计入训练天数；仅保存在本机'
+	if (e.source == SOURCE_CLOUD) return '云端记录'
+	if (e.syncState == 'failed') return '提交云端失败，目前仅保存在本机'
+	if (e.syncState == 'pending') return '正在提交云端，暂仅保存在本机'
+	if (e.syncState == 'skipped') return '仅完成热身组，不计入训练天数，也未提交云端'
+	return '本机记录'
+}

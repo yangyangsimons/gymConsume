@@ -1,28 +1,69 @@
 <template>
 	<view class="app-shell">
-		<scroll-view class="app-content" scroll-y="true">
-			<gym-dashboard @start="openWorkout"></gym-dashboard>
-		</scroll-view>
+		<gym-dashboard @start="startFlow" @resume="resumeDraft"></gym-dashboard>
 	</view>
 </template>
 
 <script setup lang="uts">
-	import { peekSessionStatus, startSession } from '@/services/workout-session.uts'
+	import { formatDate } from '@/services/gym-stats.uts'
+	import { createSession, loadHistorySessions, loadSession } from '@/services/workout-session.uts'
+	import { PLAN_CONFLICT, PLAN_CONTINUE, PLAN_FAILED_LAST, planStart } from '@/services/workout-entry.uts'
 	import { confirmDialog } from '@/services/gym-dialog.uts'
 
-	async function openWorkout() {
-		if (peekSessionStatus() == 'finished-failed') {
-			const viewLast = await confirmDialog('上次训练未提交', '上次结束的训练提交云端失败，记录仍保存在本机。要先查看并重试吗？选择“新训练”不会删除本机记录。', '查看重试', '新训练')
-			if (viewLast) {
-				uni.navigateTo({ url: '/pages/workout/workout' })
-				return
-			}
-		}
-		startSession()
-		uni.navigateTo({ url: '/pages/workout/workout' })
+	function openWorkout(id : string) {
+		uni.navigateTo({ url: '/pages/workout/workout?id=' + id })
 	}
 
-	// 从训练页返回后让首页刷新“继续训练”状态
+	// 开始今天的新训练：日期取点击这一刻的本地时间，与日历选中日期无关
+	function startToday() {
+		const s = createSession(new Date())
+		openWorkout(s.id)
+	}
+
+	// 开始 / 继续训练。日期与草稿状态在点击时重新读取，不依赖页面上已渲染的文案
+	async function startFlow() {
+		const today = formatDate(new Date())
+		const plan = planStart(loadSession(), loadHistorySessions(), today)
+		if (plan.kind == PLAN_CONTINUE) {
+			openWorkout(plan.sessionId)
+			return
+		}
+		if (plan.kind == PLAN_FAILED_LAST) {
+			const viewLast = await confirmDialog('上次训练未提交', '上次结束的训练提交云端失败，记录仍保存在本机。要先查看并重试吗？选择“新训练”不会删除本机记录。', '查看重试', '新训练')
+			if (viewLast) {
+				openWorkout(plan.sessionId)
+				return
+			}
+			// 弹窗期间可能跨日或状态变化，重新决策一次
+			const again = planStart(loadSession(), loadHistorySessions(), formatDate(new Date()))
+			if (again.kind == PLAN_CONTINUE) {
+				openWorkout(again.sessionId)
+				return
+			}
+			startToday()
+			return
+		}
+		if (plan.kind == PLAN_CONFLICT) {
+			const m = parseInt(plan.date.substring(5, 7))
+			const d = parseInt(plan.date.substring(8, 10))
+			const goOn = await confirmDialog('有未结束的训练', m + '月' + d + '日开始的训练还没有结束。继续它，还是保留它并开始今天的新训练？原训练不会被删除，也不会被计入统计。', '继续原训练', '开始今天的新训练')
+			if (goOn) {
+				openWorkout(plan.sessionId)
+				return
+			}
+			startToday()
+			return
+		}
+		startToday()
+	}
+
+	// 点击日历里“进行中”的训练：明确按该训练的 ID 继续
+	function resumeDraft(id : string) {
+		if (id == '') return
+		openWorkout(id)
+	}
+
+	// 从训练页返回、从后台回到前台（含跨日）后，让首页重新读取日期和训练状态
 	onShow(() => {
 		uni.$emit('workout-session-changed')
 	})
@@ -31,3 +72,4 @@
 <style lang="scss">
 	@import "@/styles/page-layout.scss";
 </style>
+

@@ -1,0 +1,16 @@
+// 模态弹层打开期间隐藏原生 TabBar，使弹层覆盖到底部安全区，且 TabBar 不可点击。
+// 项目使用 pages.json 的原生 tabBar，没有自定义 TabBar；由弹层组件在挂载 / 卸载时成对调用，
+// 引用计数保证嵌套弹层时只在最后一个关闭后恢复，任何关闭路径（v-if 移除、页面卸载）都会触发 onUnmounted。
+// 只能在 tab 页面里的弹层中调用（非 tab 页面没有 TabBar，无需处理）。
+let depth = 0
+
+export function lockTabBar() {
+	depth++
+	if (depth == 1) uni.hideTabBar({ animation: false })
+}
+
+export function unlockTabBar() {
+	if (depth == 0) return
+	depth--
+	if (depth == 0) uni.showTabBar({ animation: false })
+}

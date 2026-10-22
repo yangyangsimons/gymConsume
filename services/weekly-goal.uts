@@ -1,0 +1,124 @@
+import { nextWeekStart, weekStartOf } from './gym-calendar.uts'
+import { canUseLocal, cloudValue, queueCloud } from './gym-cloud.uts'
+
+// 每周训练天数目标（仅本机，未同步云端）。
+// 按“生效周”记录变更：某周使用的目标 = 生效周不晚于该周的最近一次变更。
+// 没有变更记录的更早周次视为“未知”，不会凭空生成历史目标或达标情况。
+export const GOAL_MIN = 1
+export const GOAL_MAX = 7
+export const DEFAULT_GOAL = 4
+export const EFFECT_NOW = 'now'
+export const EFFECT_NEXT = 'next'
+
+const GOAL_KEY = 'gymConsume.weeklyGoal.v1'
+const GOAL_VERSION = 1
+const CHANGE_LIMIT = 52
+
+export type GoalChange = {
+	// 生效周的周一，YYYY-MM-DD
+	week : string
+	goal : number
+	setAt : number
+}
+
+export type WeeklyGoalConfig = {
+	version : number
+	changes : GoalChange[]
+}
+
+export type GoalInfo = {
+	goal : number
+	// false：没有对应的用户设置（默认值或更早的未知周次）
+	known : boolean
+}
+
+// 目标编辑器提交的内容
+export type GoalSelection = {
+	goal : number
+	// now | next
+	effect : string
+}
+
+export function emptyGoalConfig() : WeeklyGoalConfig {
+	return { version: GOAL_VERSION, changes: [] } as WeeklyGoalConfig
+}
+
+export function isValidGoal(n : number) : boolean {
+	return Math.floor(n) == n && n >= GOAL_MIN && n <= GOAL_MAX
+}
+
+export function goalForWeek(cfg : WeeklyGoalConfig, weekStart : string) : GoalInfo {
+	let found : GoalChange | null = null
+	for (let i = 0; i < cfg.changes.length; i++) {
+		if (cfg.changes[i].week <= weekStart) found = cfg.changes[i]
+	}
+	if (found != null) return { goal: found.goal, known: true } as GoalInfo
+	return { goal: DEFAULT_GOAL, known: false } as GoalInfo
+}
+
+// 下周（或更晚）才生效的目标；没有则返回 null
+export function pendingChange(cfg : WeeklyGoalConfig, today : string) : GoalChange | null {
+	const thisWeek = weekStartOf(today)
+	for (let i = 0; i < cfg.changes.length; i++) {
+		if (cfg.changes[i].week > thisWeek) return cfg.changes[i]
+	}
+	return null
+}
+
+// 返回新配置，不修改传入对象。
+// 本周生效：从本周起使用新目标，并取消尚未生效的后续变更；
+// 下周生效：本周保持原目标，下周一起使用新目标。
+export function applyGoal(cfg : WeeklyGoalConfig, goal : number, effect : string, today : string, now : number) : WeeklyGoalConfig {
+	const week = effect == EFFECT_NEXT ? nextWeekStart(today) : weekStartOf(today)
+	const changes : GoalChange[] = []
+	for (let i = 0; i < cfg.changes.length; i++) {
+		if (cfg.changes[i].week < week) changes.push({ week: cfg.changes[i].week, goal: cfg.changes[i].goal, setAt: cfg.changes[i].setAt } as GoalChange)
+	}
+	changes.push({ week: week, goal: goal, setAt: now } as GoalChange)
+	while (changes.length > CHANGE_LIMIT) changes.shift()
+	return { version: GOAL_VERSION, changes: changes } as WeeklyGoalConfig
+}
+
+function isMondayKey(s : string) : boolean {
+	if (s.length != 10 || s.charAt(4) != '-' || s.charAt(7) != '-') return false
+	return weekStartOf(s) == s
+}
+
+// 读取到的数据不合法时丢弃对应条目，不影响其他数据
+export function sanitizeGoalConfig(raw : any | null) : WeeklyGoalConfig {
+	const cfg = emptyGoalConfig()
+	if (raw == null) return cfg
+	const src = raw as WeeklyGoalConfig
+	if (src.version != GOAL_VERSION || src.changes == null) return cfg
+	for (let i = 0; i < src.changes.length; i++) {
+		const c = src.changes[i]
+		const week = '' + c.week
+		if (!isMondayKey(week) || !isValidGoal(c.goal)) continue
+		cfg.changes.push({ week: week, goal: c.goal, setAt: c.setAt > 0 ? c.setAt : 0 } as GoalChange)
+	}
+	cfg.changes.sort((a : GoalChange, b : GoalChange) : number => a.week < b.week ? -1 : (a.week > b.week ? 1 : 0))
+	return cfg
+}
+
+export function loadGoalConfig() : WeeklyGoalConfig {
+	try {
+		const remote = cloudValue('goal', 'weekly')
+		if (remote != null) return sanitizeGoalConfig(remote)
+		if (!canUseLocal('goal', 'weekly')) return emptyGoalConfig()
+		const raw = uni.getStorageSync(GOAL_KEY)
+		if (raw == null || raw == '') return emptyGoalConfig()
+		return sanitizeGoalConfig(typeof raw == 'string' ? JSON.parse(raw) : raw)
+	} catch (e) {
+		return emptyGoalConfig()
+	}
+}
+
+export function saveGoalConfig(cfg : WeeklyGoalConfig) : boolean {
+	try {
+		uni.setStorageSync(GOAL_KEY, JSON.stringify(cfg))
+		queueCloud('goal', 'weekly', JSON.stringify(cfg))
+		return true
+	} catch (e) {
+		return false
+	}
+}

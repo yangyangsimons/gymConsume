@@ -1,0 +1,24 @@
+import { canUseLocal, cloudValue, queueCloud } from './gym-cloud.uts'
+
+export type UserSettings = { unit : string, dark : boolean }
+const KEY = 'gymConsume.settings.v1'
+
+export function loadSettings() : UserSettings {
+	const remote = cloudValue('settings', 'user')
+	if (remote == null && !canUseLocal('settings', 'user')) return { unit: 'kg', dark: false }
+	const raw = remote ?? uni.getStorageSync(KEY)
+	if (raw == '' || raw == null) return { unit: 'kg', dark: false }
+	const value = (typeof raw == 'string' ? JSON.parse(raw) : raw) as UserSettings
+	return { unit: value.unit == 'lbs' ? 'lbs' : 'kg', dark: value.dark == true }
+}
+
+export function saveSettings(value : UserSettings) {
+	try {
+		const json = JSON.stringify(value)
+		uni.setStorageSync(KEY, json)
+		queueCloud('settings', 'user', json)
+	} catch (e) {
+		console.error('Settings save failed', e)
+		uni.showToast({ title: '设置保存失败，请重试', icon: 'none' })
+	}
+}

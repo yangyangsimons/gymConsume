@@ -1,0 +1,402 @@
+<template>
+	<view class="analytics-card">
+		<view class="section-heading">
+			<view>
+				<text class="section-kicker">CONSISTENCY</text>
+				<text class="section-title">训练热力图</text>
+			</view>
+			<view class="hm-heading-right">
+				<text class="demo-tag" v-if="demo">演示数据</text>
+				<text class="hm-info" @click="showInfo">ⓘ</text>
+			</view>
+		</view>
+		<text class="hm-desc">每日完成正式组数 · 近 {{ WEEKS }} 周</text>
+
+		<view class="hm-wrap">
+			<view class="hm-weekdays">
+				<view class="hm-weekday-slot"></view>
+				<text class="hm-weekday" v-for="(w, i) in weekdayLabels" :key="i">{{ w }}</text>
+			</view>
+			<view class="hm-grid">
+				<view class="hm-months">
+					<view class="hm-month-slot" v-for="col in heatmap.columns" :key="col.key">
+						<text class="hm-month">{{ col.label }}</text>
+					</view>
+				</view>
+				<view class="hm-cols">
+					<view class="hm-col" v-for="col in heatmap.columns" :key="col.key">
+						<view class="hm-cell"
+							:class="{ future: cell.future, today: cell.today, selected: cell.date === selectedDate }"
+							:style="{ backgroundColor: cell.color }" v-for="cell in col.cells" :key="cell.date"
+							@click="onSelect(cell)"></view>
+					</view>
+				</view>
+			</view>
+		</view>
+
+		<view class="hm-legend">
+			<text class="hm-legend-text">少</text>
+			<view class="hm-legend-box" :style="{ backgroundColor: step.color }" v-for="step in steps" :key="step.level"></view>
+			<text class="hm-legend-text">多</text>
+		</view>
+		<text class="hm-summary">训练 {{ heatmap.activeDays }} 天 · 完成 {{ heatmap.totalSets }} 组</text>
+
+		<view class="hm-detail" v-if="selectedDate !== ''">
+			<view class="hm-detail-head">
+				<text class="hm-detail-date">{{ detailTitle }}</text>
+				<text class="hm-detail-sets" v-if="detailSets > 0">{{ detailSets }} 个正式组</text>
+			</view>
+			<text class="hm-detail-empty" v-if="cards.length === 0">{{ emptyText }}</text>
+			<view class="hm-entry" v-for="card in cards" :key="card.key">
+				<view class="hm-entry-top">
+					<text class="hm-entry-title">{{ card.title }}</text>
+					<text class="hm-entry-tag" :class="{ 'tag-active': card.active, 'tag-warn': card.warn }">{{ card.tag }}</text>
+				</view>
+				<text class="hm-entry-ex" v-for="(line, i) in card.lines" :key="i">{{ line }}</text>
+				<text class="hm-entry-note">{{ card.note }}</text>
+				<button class="hm-entry-link" v-if="!demo" @click="openCard(card)">{{ card.active ? '继续训练' : '查看训练记录' }}</button>
+			</view>
+			<text class="hm-entry-note" v-if="demo && cards.length > 0">演示数据没有对应的训练记录页面。</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { DayEntry, STATUS_ACTIVE, entriesOnDate, entryNote, entryTag, entryTitle, trainedDaysMap } from '@/services/gym-calendar.uts'
+	import { HEAT_STEPS, HeatCell, HeatStep, Heatmap, buildHeatmap } from '@/services/gym-insights.uts'
+	import { parseDate } from '@/services/gym-stats.uts'
+	import { infoDialog } from '@/services/gym-dialog.uts'
+
+	type DetailCard = {
+		key : string
+		// 本机训练的 ID（key 形如 local:<id>）；云端记录为空串
+		sessionId : string
+		date : string
+		title : string
+		tag : string
+		active : boolean
+		warn : boolean
+		lines : string[]
+		note : string
+	}
+
+	const props = defineProps<{
+		entries : DayEntry[]
+		today : string
+		demo ?: boolean
+	}>()
+
+	const WEEKS = 12
+	const weekdayLabels : string[] = ['一', '', '三', '', '五', '', '日']
+	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
+	const steps : HeatStep[] = HEAT_STEPS
+
+	const selectedDate = ref<string>('')
+
+	const trained = computed(() : Map<string, number> => trainedDaysMap(props.entries))
+	const heatmap = computed(() : Heatmap => buildHeatmap(trained.value, props.today, WEEKS))
+
+	function onSelect(cell : HeatCell) {
+		// 未来日期不可点击
+		if (cell.future) return
+		selectedDate.value = selectedDate.value == cell.date ? '' : cell.date
+	}
+
+	// 具体规则收在信息入口里，不常驻显示
+	function showInfo() {
+		const lines : string[] = []
+		for (let i = 0; i < steps.length; i++) lines.push(steps[i].label)
+		infoDialog('热力图说明', '每格是一天，颜色按当天已完成的正式组数分档：' + lines.join(' / ') + '。热身组、未完成组、进行中的训练不计入；同一天多次训练合并。颜色只表示组数多少，不代表训练效果或质量。虚线框是本周尚未到来的日期。')
+	}
+
+	function openCard(card : DetailCard) {
+		if (card.active) {
+			// 明确按该训练的 ID 继续，不依赖“当前训练”
+			uni.navigateTo({ url: '/pages/workout/workout?id=' + card.sessionId })
+			return
+		}
+		uni.navigateTo({ url: '/pages/day-detail/day-detail?date=' + card.date + '&key=' + card.key })
+	}
+
+	const detailTitle = computed(() : string => {
+		const d = parseDate(selectedDate.value)
+		return (d.getMonth() + 1) + '月' + d.getDate() + '日 · 星期' + weekNames[d.getDay()]
+	})
+
+	const detailSets = computed(() : number => trained.value.get(selectedDate.value) ?? 0)
+
+	const cards = computed(() : DetailCard[] => {
+		const out : DetailCard[] = []
+		const list = entriesOnDate(props.entries, selectedDate.value)
+		for (let i = 0; i < list.length; i++) {
+			const e = list[i]
+			const lines : string[] = []
+			for (let j = 0; j < e.exercises.length; j++) {
+				const ex = e.exercises[j]
+				lines.push(ex.name + ' · ' + (e.counted ? ex.workSets + ' 个正式组' : '未计入'))
+			}
+			const isDemo = props.demo == true
+			const tag = isDemo ? '演示' : entryTag(e)
+			out.push({
+				key: e.key,
+				sessionId: e.key.startsWith('local:') ? e.key.substring(6) : '',
+				date: e.date,
+				title: entryTitle(e),
+				tag: tag,
+				active: e.status == STATUS_ACTIVE,
+				warn: !isDemo && (tag == '提交失败' || tag == '待提交' || tag == '仅热身'),
+				lines: lines,
+				note: isDemo ? '演示数据，由本地生成' : entryNote(e)
+			} as DetailCard)
+		}
+		return out
+	})
+
+	const emptyText = computed(() : string => {
+		if (selectedDate.value > props.today) return '这一天还没到'
+		return selectedDate.value == props.today ? '今天还没有训练记录' : '这一天没有训练记录'
+	})
+</script>
+
+<style lang="scss">
+	@import "@/styles/analytics-card.scss";
+
+	.hm-desc {
+		display: block;
+		margin: -8px 0 14px;
+		color: #7d8982;
+		font-size: 12px;
+	}
+
+	.hm-wrap {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.hm-weekdays {
+		width: 16px;
+		margin-right: 4px;
+	}
+
+	.hm-weekday-slot {
+		height: 16px;
+	}
+
+	.hm-weekday {
+		display: block;
+		height: 21px;
+		color: #a0a8a3;
+		font-size: 10px;
+		line-height: 18px;
+		text-align: center;
+	}
+
+	.hm-grid {
+		flex: 1;
+	}
+
+	.hm-months {
+		display: flex;
+		flex-direction: row;
+		height: 16px;
+		overflow: visible;
+	}
+
+	.hm-month-slot {
+		position: relative;
+		flex: 1;
+		margin: 0 2px;
+		overflow: visible;
+	}
+
+	.hm-month {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 40px;
+		color: #8d9691;
+		font-size: 10px;
+		white-space: nowrap;
+	}
+
+	.hm-cols {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.hm-col {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		margin: 0 2px;
+	}
+
+	.hm-cell {
+		height: 18px;
+		margin-bottom: 3px;
+		border-width: 1.5px;
+		border-style: solid;
+		border-color: transparent;
+		border-radius: 4px;
+	}
+
+	.hm-cell.future {
+		border-style: dashed;
+		border-color: #d5dbd7;
+	}
+
+	.hm-cell.today {
+		border-color: #1db776;
+	}
+
+	.hm-cell.selected {
+		border-color: #1f2a24;
+	}
+
+	.hm-legend-text {
+		color: #8d9691;
+		font-size: 11px;
+	}
+
+	.hm-legend-box {
+		width: 12px;
+		height: 12px;
+		margin: 0 3px;
+		border-radius: 3px;
+	}
+
+	.hm-legend {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: flex-end;
+		margin-top: 8px;
+	}
+
+	.hm-summary {
+		display: block;
+		margin-top: 8px;
+		color: #6e7973;
+		font-size: 13px;
+	}
+
+	.hm-heading-right {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.hm-info {
+		width: 32px;
+		height: 32px;
+		color: #8d9691;
+		font-size: 18px;
+		line-height: 32px;
+		text-align: center;
+	}
+
+	.hm-detail {
+		margin-top: 14px;
+		padding-top: 14px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #eef1ef;
+	}
+
+	.hm-detail-head {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.hm-detail-date {
+		color: #1f2a24;
+		font-size: 15px;
+		font-weight: 700;
+	}
+
+	.hm-detail-sets {
+		color: #159b65;
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.hm-detail-empty {
+		display: block;
+		margin-top: 10px;
+		color: #8d9691;
+		font-size: 13px;
+	}
+
+	.hm-entry {
+		margin-top: 10px;
+		padding: 12px;
+		border-radius: 14px;
+		background-color: #f6f8f6;
+	}
+
+	.hm-entry-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.hm-entry-title {
+		color: #1f2a24;
+		font-size: 14px;
+		font-weight: 600;
+	}
+
+	.hm-entry-tag {
+		margin-left: 8px;
+		padding: 2px 7px;
+		border-radius: 6px;
+		color: #318463;
+		background-color: #edf8f3;
+		font-size: 10px;
+	}
+
+	.hm-entry-tag.tag-active {
+		color: #a35f0f;
+		background-color: #fdf0dc;
+	}
+
+	.hm-entry-tag.tag-warn {
+		color: #b5483f;
+		background-color: #fceceb;
+	}
+
+	.hm-entry-ex {
+		display: block;
+		margin-top: 6px;
+		color: #4a5650;
+		font-size: 13px;
+	}
+
+	.hm-entry-note {
+		display: block;
+		margin-top: 6px;
+		color: #a0aaa4;
+		font-size: 11px;
+		line-height: 1.5;
+	}
+
+	.hm-entry-link {
+		margin: 10px 0 0;
+		padding: 0;
+		border-width: 0;
+		color: #25805d;
+		background-color: transparent;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 1.4;
+		text-align: left;
+	}
+
+	/* #ifdef MP-WEIXIN */
+	.hm-entry-link::after {
+		border-width: 0;
+	}
+	/* #endif */
+</style>

@@ -1,5 +1,6 @@
 <template>
-	<view>
+	<view class="dash-root">
+		<scroll-view class="app-content" scroll-y="true">
 		<view class="topbar">
 			<view>
 				<text class="eyebrow">{{ dateLabel }}</text>
@@ -10,22 +11,31 @@
 
 		<view class="hero-card">
 			<view class="hero-decor"></view>
-			<view class="hero-copy">
-				<view class="hero-pill">
-					<gym-icon name="flame-mint" :size="15"></gym-icon>
-					<text class="hero-pill-text">连续训练 {{ streak }} 天</text>
+			<view class="hero-main">
+				<view class="hero-copy">
+					<view class="hero-pill">
+						<gym-icon name="flame-mint" :size="15"></gym-icon>
+						<text class="hero-pill-text">连续训练 {{ streak }} 天</text>
+					</view>
+					<text class="hero-title">本周已训练</text>
+					<text class="hero-count"><text class="hero-title-strong">{{ week.trainedDays }}</text> / {{ week.goal }} 天</text>
+					<text class="hero-status">{{ weekStatus }}</text>
+					<text class="hero-sub">本周训练容量 {{ weekVol }} kg</text>
+					<text class="hero-sub hero-sub-accent" v-if="inProgressNote !== ''">{{ inProgressNote }}</text>
 				</view>
-				<text class="hero-title" v-if="weekRemaining > 0">本周再练 <text class="hero-title-strong">{{ weekRemaining }}</text> 次，就完成目标</text>
-				<text class="hero-title" v-else>本周目标已完成</text>
-				<text class="hero-sub">本周训练容量 {{ weekVolume }} kg</text>
-			</view>
-			<view class="progress-ring">
-				<image class="progress-ring-img" :src="ringSrc" mode="aspectFit"></image>
-				<view class="progress-ring-center">
-					<text class="progress-ring-value">{{ weekCount }}</text>
-					<text class="progress-ring-total">/ {{ weekGoal }} 次</text>
+				<view class="progress-ring">
+					<image class="progress-ring-img" :src="ringSrc" mode="aspectFit"></image>
+					<view class="progress-ring-center">
+						<text class="progress-ring-value">{{ week.trainedDays }}</text>
+						<text class="progress-ring-total">/ {{ week.goal }} 天</text>
+					</view>
 				</view>
 			</view>
+			<text class="hero-pending" v-if="pendingNote !== ''">{{ pendingNote }}</text>
+			<button class="hero-goal-btn" @click="showGoal = true">
+				<text class="hero-goal-text">{{ goalLabel }}</text>
+				<text class="hero-goal-action">调整目标</text>
+			</button>
 		</view>
 
 		<view class="section-block">
@@ -35,108 +45,174 @@
 					<text class="section-title">训练日历</text>
 				</view>
 				<view class="month-controls">
+					<button class="month-btn month-today" v-if="monthOffset !== 0 || selectedDate !== todayStr" @click="backToToday">今天</button>
 					<button class="month-btn" @click="changeMonth(-1)">‹</button>
-					<button class="month-btn" @click="changeMonth(1)">›</button>
+					<button class="month-btn" :class="{ disabled: monthOffset >= 0 }" @click="changeMonth(1)">›</button>
 				</view>
 			</view>
 			<view class="calendar">
 				<text class="weekday" v-for="day in weekDays" :key="day">{{ day }}</text>
-				<view class="calendar-day" :class="{ muted: cell.muted, trained: cell.trained, today: cell.today }"
-					v-for="(cell, idx) in calendarCells" :key="idx">
-					<text>{{ cell.label }}</text>
-					<view class="calendar-dot" v-if="cell.trained"></view>
+				<view class="calendar-slot" v-for="cell in calendarCells" :key="cell.date" @click="onSelect(cell)">
+					<view class="calendar-day"
+						:class="{ muted: !cell.inMonth, future: cell.future && cell.inMonth, trained: cell.trained && cell.inMonth, today: cell.today && cell.inMonth, selected: cell.selected && cell.inMonth }">
+						<text class="calendar-day-text">{{ cell.day }}</text>
+						<view class="calendar-dot" v-if="cell.inMonth && cell.trained"></view>
+						<view class="calendar-dot dot-active" v-else-if="cell.inMonth && cell.active"></view>
+					</view>
+				</view>
+			</view>
+			<view class="calendar-legend">
+				<view class="legend-item">
+					<view class="legend-dot"></view>
+					<text>已训练</text>
+				</view>
+				<view class="legend-item">
+					<view class="legend-dot legend-active"></view>
+					<text>进行中</text>
+				</view>
+				<view class="legend-item">
+					<view class="legend-ring"></view>
+					<text>今天</text>
 				</view>
 			</view>
 			<view class="calendar-summary">
-				<view class="calendar-summary-left">
-					<view class="legend-dot"></view>
-					<text>{{ monthDaysLabel }}</text>
-				</view>
+				<text class="calendar-summary-left">{{ monthDaysLabel }}</text>
 				<text class="calendar-summary-strong" v-if="hasPrevMonth">{{ monthChangeLabel }} <text class="calendar-summary-small">较上月</text></text>
 			</view>
+			<text class="source-note" v-if="cloudState === 'failed'">云端训练记录加载失败，当前仅显示本机记录。</text>
 		</view>
 
 		<view class="section-block today-section">
 			<view class="section-heading">
 				<view>
-					<text class="section-kicker">TODAY</text>
-					<text class="section-title">今日训练</text>
+					<text class="section-kicker">{{ detailKicker }}</text>
+					<text class="section-title">{{ detailTitle }}</text>
 				</view>
-				<button class="text-button">
-					<text>查看计划</text>
-					<gym-icon name="chevron-muted" :size="15"></gym-icon>
+				<button class="text-button" v-if="selectedDate !== todayStr" @click="backToToday">
+					<text>回到今天</text>
 				</button>
 			</view>
-			<view class="workout-card">
-				<view class="workout-icon">
+			<view class="empty-card" v-if="dayCards.length === 0">
+				<text class="empty-title">{{ emptyTitle }}</text>
+				<text class="empty-sub" v-if="emptySub !== ''">{{ emptySub }}</text>
+			</view>
+			<view class="workout-card" v-for="card in dayCards" :key="card.key" @click="openCard(card)">
+				<view class="workout-icon" :class="{ 'icon-active': card.active }">
 					<gym-icon name="dumbbell-brand" :size="24"></gym-icon>
 				</view>
 				<view class="workout-info">
 					<view class="workout-info-top">
-						<text class="workout-title">{{ todayTitle }}</text>
-						<text class="status-tag">{{ todayTag }}</text>
+						<text class="workout-title">{{ card.title }}</text>
+						<text class="status-tag" :class="{ 'tag-active': card.active, 'tag-warn': card.warn }">{{ card.tag }}</text>
 					</view>
-					<text class="workout-sub">{{ todaySub }}</text>
-					<view class="meta-row" v-if="todayExerciseCount > 0">
-						<view class="meta-item">
+					<text class="workout-sub">{{ card.sub }}</text>
+					<view class="meta-row" v-if="card.minutes > 0 || card.exerciseCount > 0">
+						<view class="meta-item" v-if="card.minutes > 0">
 							<gym-icon name="clock-muted" :size="15"></gym-icon>
-							<text>已用 {{ todayMinutes }} 分钟</text>
+							<text>{{ card.active ? '已用 ' : '' }}{{ card.minutes }} 分钟</text>
 						</view>
-						<view class="meta-item">
+						<view class="meta-item" v-if="card.exerciseCount > 0">
 							<gym-icon name="dumbbell-muted" :size="15"></gym-icon>
-							<text>{{ todayExerciseCount }} 个动作</text>
+							<text>{{ card.exerciseCount }} 个动作 · {{ card.setCount }} 组</text>
 						</view>
 					</view>
+					<text class="workout-note">{{ card.note }}</text>
 				</view>
-				<button class="round-arrow">
+				<view class="round-arrow">
 					<gym-icon name="chevron-muted" :size="18"></gym-icon>
-				</button>
+				</view>
 			</view>
 		</view>
 
-		<button class="start-button" @click="onStart">
+		<text class="start-hint" v-if="startHint !== ''">{{ startHint }}</text>
+		<button class="start-button" :class="{ 'is-continue': hasActive, 'has-hint': startHint !== '' }" @click="onStart">
 			<view class="start-button-icon">
 				<gym-icon name="plus-white" :size="22"></gym-icon>
 			</view>
 			<text>{{ startLabel }}</text>
 		</button>
+		</scroll-view>
+
+		<!-- 弹层放在 scroll-view 之外，避免 iOS 真机上 fixed 被滚动容器限制成内容宽度 -->
+		<gym-week-goal-editor v-if="showGoal" :goal="goalInfo.goal" :pending-goal="pendingGoal"
+			:next-week-label="nextWeekLabel" @save="onGoalSave" @close="showGoal = false"></gym-week-goal-editor>
 	</view>
 </template>
 
 <script setup lang="uts">
-	import { Workout, addDays, calcStreak, countDays, formatDate, parseDate, setsPerDate, weekdayIndex } from '@/services/gym-stats.uts'
+	import { Workout, calcStreak, formatDate, parseDate } from '@/services/gym-stats.uts'
 	import { loadWorkouts } from '@/services/gym-api.uts'
-	import { peekSessionStatus } from '@/services/workout-session.uts'
+	import { WorkoutSession, loadHistorySessions, loadSession } from '@/services/workout-session.uts'
+	import { PLAN_CONFLICT, PLAN_CONTINUE, StartPlan, planStart } from '@/services/workout-entry.uts'
+	import {
+		CalendarCell, DayEntry, MonthRef, STATUS_ACTIVE, WeekProgress, activeDates, buildDayEntries, buildMonthCells,
+		calcWeekProgress, entriesOnDate, entryNote, entryTag, entryTitle, monthTrainedDays, nextWeekStart, shiftMonth,
+		trainedDaysMap, weekStartOf, weekVolume
+	} from '@/services/gym-calendar.uts'
+	import {
+		GoalInfo, GoalSelection, WeeklyGoalConfig, applyGoal, goalForWeek, loadGoalConfig, pendingChange, saveGoalConfig
+	} from '@/services/weekly-goal.uts'
 
-	type CalendarCell = {
-		label : number
-		muted : boolean
-		trained : boolean
-		today : boolean
+	type DayCard = {
+		key : string
+		// 本机训练的 ID（key 形如 local:<id>）；云端记录为空串
+		sessionId : string
+		date : string
+		title : string
+		tag : string
+		active : boolean
+		warn : boolean
+		sub : string
+		note : string
+		minutes : number
+		exerciseCount : number
+		setCount : number
 	}
 
-	const emit = defineEmits(['start'])
-
-	function onStart() {
-		emit('start')
-	}
+	const emit = defineEmits(['start', 'resume'])
 
 	const weekDays = ref<string[]>(['一', '二', '三', '四', '五', '六', '日'])
 	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
 	const monthNames : string[] = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER']
-	const weekGoal = 4
 
 	const workouts = ref<Workout[]>([])
-	const todayStr = ref<string>(formatDate(new Date()))
-	const monthOffset = ref<number>(0)
-	const draftActive = ref<boolean>(false)
-
-	const trained = computed(() : Map<string, number> => setsPerDate(workouts.value))
-
-	const dateLabel = computed(() : string => {
-		const d = parseDate(todayStr.value)
-		return (d.getMonth() + 1) + '月' + d.getDate() + '日 · 星期' + weekNames[d.getDay()]
+	const currentSession = ref<WorkoutSession | null>(null)
+	const historySessions = ref<WorkoutSession[]>([])
+	// 当前会话 + 本机历史（含被保留的旧草稿），日历与统计的本机来源
+	const sessions = computed(() : WorkoutSession[] => {
+		const out : WorkoutSession[] = []
+		if (currentSession.value != null) out.push(currentSession.value!)
+		for (let i = 0; i < historySessions.value.length; i++) out.push(historySessions.value[i])
+		return out
 	})
+	// loading | ok | failed
+	const cloudState = ref<string>('loading')
+	const todayStr = ref<string>(formatDate(new Date()))
+	const selectedDate = ref<string>(todayStr.value)
+	const monthOffset = ref<number>(0)
+	const goalCfg = ref<WeeklyGoalConfig>(loadGoalConfig())
+	const showGoal = ref<boolean>(false)
+
+	function shortDate(date : string) : string {
+		const d = parseDate(date)
+		return (d.getMonth() + 1) + '月' + d.getDate() + '日'
+	}
+
+	function longDate(date : string) : string {
+		return shortDate(date) + ' · 星期' + weekNames[parseDate(date).getDay()]
+	}
+
+	const entries = computed(() : DayEntry[] => buildDayEntries(workouts.value, sessions.value, cloudState.value == 'ok'))
+	const trained = computed(() : Map<string, number> => trainedDaysMap(entries.value))
+	const activeDays = computed(() : string[] => activeDates(entries.value))
+	const activeEntry = computed(() : DayEntry | null => {
+		for (let i = 0; i < entries.value.length; i++) {
+			if (entries.value[i].status == STATUS_ACTIVE) return entries.value[i]
+		}
+		return null
+	})
+
+	const dateLabel = computed(() : string => longDate(todayStr.value))
 
 	const greeting = computed(() : string => {
 		const h = new Date().getHours()
@@ -148,75 +224,51 @@
 
 	const streak = computed(() : number => calcStreak(trained.value, parseDate(todayStr.value)))
 
-	const weekStart = computed(() : Date => {
+	// ---- 周目标 ----
+	const thisWeek = computed(() : string => weekStartOf(todayStr.value))
+	const goalInfo = computed(() : GoalInfo => goalForWeek(goalCfg.value, thisWeek.value))
+	const pendingGoal = computed(() : number => {
+		const c = pendingChange(goalCfg.value, todayStr.value)
+		if (c == null || c.goal == goalInfo.value.goal) return 0
+		return c.goal
+	})
+	const nextWeekLabel = computed(() : string => shortDate(nextWeekStart(todayStr.value)) + '（下周一）')
+	const week = computed(() : WeekProgress => calcWeekProgress(trained.value, todayStr.value, goalInfo.value.goal))
+	const weekVol = computed(() : number => weekVolume(entries.value, thisWeek.value))
+	const ringSrc = computed(() : string => '/static/charts/progress-ring-g' + week.value.goal + '-' + Math.min(week.value.trainedDays, week.value.goal) + '.svg')
+
+	const weekStatus = computed(() : string => {
+		const w = week.value
+		if (w.extra > 0) return '已超额完成 ' + w.extra + ' 天'
+		if (w.met) return '本周目标已达成'
+		return '再练 ' + w.remaining + ' 天就完成目标'
+	})
+	const goalLabel = computed(() : string => '目标：每周 ' + goalInfo.value.goal + ' 天' + (goalInfo.value.known ? '' : '（默认）'))
+	const pendingNote = computed(() : string => pendingGoal.value > 0 ? nextWeekLabel.value + '起目标改为每周 ' + pendingGoal.value + ' 天' : '')
+	const inProgressNote = computed(() : string => {
+		const e = activeEntry.value
+		if (e == null || e.exercises.length == 0) return ''
+		return '另有一场进行中的训练，结束后才计入本周'
+	})
+
+	// ---- 日历 ----
+	const viewMonth = computed(() : MonthRef => {
 		const t = parseDate(todayStr.value)
-		return addDays(t, -weekdayIndex(t))
+		return shiftMonth(t.getFullYear(), t.getMonth(), monthOffset.value)
 	})
+	const monthKicker = computed(() : string => monthNames[viewMonth.value.month] + ' ' + viewMonth.value.year)
+	const calendarCells = computed(() : CalendarCell[] => buildMonthCells(viewMonth.value.year, viewMonth.value.month, todayStr.value, selectedDate.value, trained.value, activeDays.value))
 
-	const weekCount = computed(() : number => countDays(trained.value, weekStart.value, addDays(weekStart.value, 7)))
-	const weekRemaining = computed(() : number => Math.max(0, weekGoal - weekCount.value))
-	const ringSrc = computed(() : string => '/static/charts/progress-ring-' + Math.min(weekCount.value, weekGoal) + '.svg')
-
-	const weekVolume = computed(() : number => {
-		const from = formatDate(weekStart.value)
-		const to = formatDate(addDays(weekStart.value, 7))
-		let v = 0
-		for (let i = 0; i < workouts.value.length; i++) {
-			const w = workouts.value[i]
-			if (w.date >= from && w.date < to) v += w.totalVolume
-		}
-		return Math.round(v)
-	})
-
-	const viewMonth = computed(() : Date => {
-		const t = parseDate(todayStr.value)
-		return new Date(t.getFullYear(), t.getMonth() + monthOffset.value, 1)
-	})
-
-	const monthKicker = computed(() : string => monthNames[viewMonth.value.getMonth()] + ' ' + viewMonth.value.getFullYear())
-
-	function monthTrainedDays(first : Date) : number {
-		return countDays(trained.value, first, new Date(first.getFullYear(), first.getMonth() + 1, 1))
-	}
-
-	const monthDays = computed(() : number => monthTrainedDays(viewMonth.value))
+	const monthDays = computed(() : number => monthTrainedDays(trained.value, viewMonth.value.year, viewMonth.value.month))
 	const prevMonthDays = computed(() : number => {
-		const f = viewMonth.value
-		return monthTrainedDays(new Date(f.getFullYear(), f.getMonth() - 1, 1))
+		const p = shiftMonth(viewMonth.value.year, viewMonth.value.month, -1)
+		return monthTrainedDays(trained.value, p.year, p.month)
 	})
-
-	const monthDaysLabel = computed(() : string => (monthOffset.value == 0 ? '本月' : (viewMonth.value.getMonth() + 1) + '月') + '已训练 ' + monthDays.value + ' 天')
+	const monthDaysLabel = computed(() : string => (monthOffset.value == 0 ? '本月' : (viewMonth.value.month + 1) + '月') + '已训练 ' + monthDays.value + ' 天')
 	const hasPrevMonth = computed(() : boolean => prevMonthDays.value > 0)
 	const monthChangeLabel = computed(() : string => {
 		const pct = Math.round((monthDays.value - prevMonthDays.value) / prevMonthDays.value * 100)
 		return (pct >= 0 ? '+' : '') + pct + '%'
-	})
-
-	const calendarCells = computed(() : CalendarCell[] => {
-		const first = viewMonth.value
-		const y = first.getFullYear()
-		const m = first.getMonth()
-		const lead = weekdayIndex(first)
-		const dim = new Date(y, m + 1, 0).getDate()
-		const prevDim = new Date(y, m, 0).getDate()
-		const total = lead + dim <= 35 ? 35 : 42
-		const cells : CalendarCell[] = []
-		for (let i = 0; i < total; i++) {
-			const day = i - lead + 1
-			const valid = day > 0 && day <= dim
-			let label : number = day
-			if (!valid) {
-				label = day <= 0 ? prevDim + day : day - dim
-			}
-			const key = valid ? formatDate(new Date(y, m, day)) : ''
-			cells.push({
-				label: label,
-				muted: !valid,
-				trained: valid && trained.value.has(key),
-				today: valid && key == todayStr.value
-			} as CalendarCell)
-		}
-		return cells
 	})
 
 	function changeMonth(delta : number) {
@@ -224,85 +276,153 @@
 		monthOffset.value += delta
 	}
 
-	const todayWorkouts = computed(() : Workout[] => workouts.value.filter((w : Workout) : boolean => w.date == todayStr.value))
-
-	const todayExerciseCount = computed(() : number => {
-		let n = 0
-		for (let i = 0; i < todayWorkouts.value.length; i++) n += todayWorkouts.value[i].exercises.length
-		return n
-	})
-
-	const todayMinutes = computed(() : number => {
-		let n = 0
-		for (let i = 0; i < todayWorkouts.value.length; i++) n += todayWorkouts.value[i].durationMin
-		return n
-	})
-
-	const todayNames = computed(() : string[] => {
-		const names : string[] = []
-		for (let i = 0; i < todayWorkouts.value.length; i++) {
-			const list = todayWorkouts.value[i].exercises
-			for (let j = 0; j < list.length; j++) {
-				if (!names.includes(list[j].name)) names.push(list[j].name)
-			}
-		}
-		return names
-	})
-
-	const todayTitle = computed(() : string => {
-		const cats : string[] = []
-		for (let i = 0; i < todayWorkouts.value.length; i++) {
-			const list = todayWorkouts.value[i].exercises
-			for (let j = 0; j < list.length; j++) {
-				if (!cats.includes(list[j].category)) cats.push(list[j].category)
-			}
-		}
-		return cats.length > 0 ? cats.join('/') + '训练' : '今日训练'
-	})
-	const todayTag = computed(() : string => draftActive.value ? '进行中' : (todayExerciseCount.value > 0 ? '已记录' : '待开始'))
-	const todaySub = computed(() : string => {
-		if (draftActive.value && todayNames.value.length == 0) return '有一场未结束的训练，已保存到本机'
-		return todayNames.value.length > 0 ? todayNames.value.join(' · ') : '今天还没有训练记录'
-	})
-	const startLabel = computed(() : string => draftActive.value ? '继续今日训练' : '开始今日训练')
-
-	function refreshDraft() {
-		draftActive.value = peekSessionStatus() == 'active'
+	function onSelect(cell : CalendarCell) {
+		if (!cell.inMonth) return
+		selectedDate.value = cell.date
 	}
 
-	function refresh() {
+	function backToToday() {
+		monthOffset.value = 0
+		selectedDate.value = todayStr.value
+	}
+
+	// ---- 所选日期的训练 ----
+	const isToday = computed(() : boolean => selectedDate.value == todayStr.value)
+	const detailKicker = computed(() : string => isToday.value ? 'TODAY' : (selectedDate.value > todayStr.value ? 'UPCOMING DATE' : 'HISTORY'))
+	const detailTitle = computed(() : string => isToday.value ? '今日训练' : longDate(selectedDate.value))
+	const emptyTitle = computed(() : string => {
+		if (isToday.value) return '今天还没有训练记录'
+		return selectedDate.value > todayStr.value ? '这一天还没到' : '这一天没有训练记录'
+	})
+	const emptySub = computed(() : string => isToday.value && !hasActive.value ? '点击下方按钮开始今天的训练' : '')
+
+	const dayCards = computed(() : DayCard[] => {
+		const list = entriesOnDate(entries.value, selectedDate.value)
+		const out : DayCard[] = []
+		for (let i = 0; i < list.length; i++) {
+			const e = list[i]
+			const names : string[] = []
+			let sets = 0
+			for (let j = 0; j < e.exercises.length; j++) {
+				names.push(e.exercises[j].name)
+				sets += e.exercises[j].workSets
+			}
+			const tag = entryTag(e)
+			out.push({
+				key: e.key,
+				sessionId: e.key.startsWith('local:') ? e.key.substring(6) : '',
+				date: e.date,
+				title: entryTitle(e),
+				tag: tag,
+				active: e.status == STATUS_ACTIVE,
+				warn: tag == '提交失败' || tag == '待提交' || tag == '仅热身',
+				sub: names.length > 0 ? names.join(' · ') : '还没有已完成的动作',
+				note: entryNote(e),
+				minutes: e.durationMin,
+				exerciseCount: e.exercises.length,
+				setCount: e.workSets > 0 ? e.workSets : sets
+			} as DayCard)
+		}
+		return out
+	})
+
+	// ---- 开始 / 继续训练 ----
+	// 只由“今天”和草稿身份决定，日历选中日期不参与
+	const plan = computed(() : StartPlan => planStart(currentSession.value, historySessions.value, todayStr.value))
+	const hasActive = computed(() : boolean => plan.value.kind == PLAN_CONTINUE || plan.value.kind == PLAN_CONFLICT)
+	const startLabel = computed(() : string => {
+		if (plan.value.kind == PLAN_CONTINUE) return '继续训练'
+		if (plan.value.kind == PLAN_CONFLICT) return '未结束的训练 · ' + shortDate(plan.value.date) + '开始'
+		return '开始今日训练 · ' + shortDate(todayStr.value)
+	})
+	const startHint = computed(() : string => {
+		let text = ''
+		if (selectedDate.value != todayStr.value) text = '当前查看的是 ' + shortDate(selectedDate.value) + '，仅用于浏览。'
+		if (plan.value.kind == PLAN_CONTINUE) return text + '将继续今天已开始的训练，不会新建。'
+		if (plan.value.kind == PLAN_CONFLICT) return text + '有一场 ' + shortDate(plan.value.date) + ' 开始的训练尚未结束，点击后可选择继续它，或保留它并开始今天的新训练。'
+		if (text != '') return text + '开始训练只会记录到今天（' + shortDate(todayStr.value) + '）。'
+		return ''
+	})
+
+	function onStart() {
+		emit('start')
+	}
+
+	function openCard(card : DayCard) {
+		if (card.active) {
+			// 明确指向这张卡片对应的未结束训练
+			emit('resume', card.sessionId)
+			return
+		}
+		uni.navigateTo({ url: '/pages/day-detail/day-detail?date=' + card.date + '&key=' + card.key })
+	}
+
+	// ---- 目标编辑 ----
+	function onGoalSave(sel : GoalSelection) {
+		const next = applyGoal(goalCfg.value, sel.goal, sel.effect, todayStr.value, Date.now())
+		if (!saveGoalConfig(next)) {
+			uni.showToast({ title: '本机保存失败，请重试', icon: 'none' })
+			return
+		}
+		goalCfg.value = next
+		showGoal.value = false
+		uni.showToast({ title: sel.effect == 'next' ? '已设置，下周起生效' : '本周目标已更新', icon: 'none' })
+	}
+
+	// ---- 数据刷新 ----
+	// 每次回到首页（含从后台返回、跨日）都重新读取今天的本地日期
+	function refreshLocal() {
+		const prevToday = todayStr.value
 		todayStr.value = formatDate(new Date())
+		// 跨零点后，原本停留在“今天”的选中日期跟随到新的今天
+		if (selectedDate.value == prevToday) selectedDate.value = todayStr.value
+		currentSession.value = loadSession()
+		historySessions.value = loadHistorySessions()
+		goalCfg.value = loadGoalConfig()
+	}
+
+	function refreshCloud() {
 		loadWorkouts().then((list : Workout[]) => {
 			workouts.value = list
+			cloudState.value = 'ok'
 		}).catch(() => {
+			cloudState.value = 'failed'
 			uni.showToast({ title: '训练数据加载失败', icon: 'none' })
 		})
 	}
 
 	function onSaved() {
-		refresh()
+		refreshLocal()
+		refreshCloud()
 	}
 
 	onMounted(() => {
-		refresh()
-		refreshDraft()
+		refreshLocal()
+		refreshCloud()
 		uni.$on('workout-saved', onSaved)
-		uni.$on('workout-session-changed', refreshDraft)
+		uni.$on('workout-session-changed', refreshLocal)
 	})
 
 	onUnmounted(() => {
 		uni.$off('workout-saved', onSaved)
-		uni.$off('workout-session-changed', refreshDraft)
+		uni.$off('workout-session-changed', refreshLocal)
 	})
 </script>
 
 <style lang="scss">
+	@import "@/styles/page-layout.scss";
+
+	.dash-root {
+		width: 100%;
+		height: 100%;
+	}
+
 	.topbar {
 		display: flex;
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		padding: 34px 2px 24px;
+		padding: 4px 2px 24px;
 	}
 
 	.eyebrow,
@@ -332,12 +452,18 @@
 	.hero-card {
 		position: relative;
 		display: flex;
-		flex-direction: row;
-		min-height: 184px;
-		padding: 23px;
+		flex-direction: column;
+		padding: 18px;
 		border-radius: 25px;
 		background-color: #1f4433;
 		overflow: hidden;
+	}
+
+	.hero-main {
+		position: relative;
+		display: flex;
+		flex-direction: row;
+		min-height: 140px;
 	}
 
 	.hero-decor {
@@ -375,22 +501,78 @@
 	}
 
 	.hero-title {
-		margin-top: 17px;
-		color: #ffffff;
-		font-size: 22px;
+		margin-top: 14px;
+		color: #d8efe3;
+		font-size: 15px;
 		line-height: 1.4;
+		font-weight: 500;
+	}
+
+	.hero-count {
+		display: block;
+		color: #ffffff;
+		font-size: 20px;
+		line-height: 1.3;
 		font-weight: 500;
 	}
 
 	.hero-title-strong {
 		color: #70e6ad;
-		font-size: 26px;
+		font-size: 32px;
+	}
+
+	.hero-status {
+		margin-top: 4px;
+		color: #d8efe3;
+		font-size: 13px;
+		line-height: 1.5;
 	}
 
 	.hero-sub {
-		margin-top: 8px;
+		margin-top: 6px;
 		color: #bdd3c8;
 		font-size: 11px;
+		line-height: 1.5;
+	}
+
+	.hero-sub-accent {
+		color: #9ff0c8;
+	}
+
+	.hero-pending {
+		position: relative;
+		margin-top: 8px;
+		color: #9ff0c8;
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	.hero-goal-btn {
+		position: relative;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		margin: 14px 0 0;
+		padding: 8px 8px 8px 12px;
+		border-width: 0;
+		border-radius: 12px;
+		background-color: #ffffff20;
+	}
+
+	.hero-goal-text {
+		color: #e4f6ec;
+		font-size: 12px;
+	}
+
+	.hero-goal-action {
+		padding: 3px 10px;
+		border-radius: 8px;
+		color: #1f4433;
+		background-color: #70e6ad;
+		font-size: 12px;
+		font-weight: 700;
 	}
 
 	.progress-ring {
@@ -425,12 +607,12 @@
 	.progress-ring-total {
 		margin-top: 4px;
 		color: #afc9bc;
-		font-size: 10px;
+		font-size: 11px;
 	}
 
 	.section-block {
 		margin-top: 28px;
-		padding: 20px;
+		padding: 16px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #e9edea;
@@ -453,6 +635,7 @@
 	.month-controls {
 		display: flex;
 		flex-direction: row;
+		align-items: center;
 	}
 
 	.month-btn {
@@ -461,14 +644,35 @@
 		justify-content: center;
 		width: 29px;
 		height: 29px;
-		margin-left: 5px;
+		margin: 0 0 0 5px;
+		padding: 0;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #e4e9e5;
 		border-radius: 9px;
 		background-color: #fafbfa;
 		font-size: 20px;
+		line-height: 1;
 	}
+
+	.month-btn.month-today {
+		width: auto;
+		padding: 0 10px;
+		color: #25805d;
+		font-size: 12px;
+	}
+
+	.month-btn.disabled {
+		color: #c9cecb;
+	}
+
+	/* #ifdef MP-WEIXIN */
+	.month-btn::after,
+	.hero-goal-btn::after,
+	.text-button::after {
+		border-width: 0;
+	}
+	/* #endif */
 
 	.calendar {
 		display: flex;
@@ -480,8 +684,16 @@
 		width: 14.28%;
 		padding-bottom: 7px;
 		color: #a0aaa4;
-		font-size: 10px;
+		font-size: 11px;
 		text-align: center;
+	}
+
+	.calendar-slot {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 14.28%;
+		height: 40px;
 	}
 
 	.calendar-day {
@@ -489,15 +701,26 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 14.28%;
+		width: 34px;
 		height: 34px;
+		border-width: 1.5px;
+		border-style: solid;
+		border-color: transparent;
 		border-radius: 17px;
 		color: #4a5650;
-		font-size: 12px;
+		font-size: 13px;
+	}
+
+	.calendar-day-text {
+		color: inherit;
 	}
 
 	.calendar-day.muted {
-		color: #c9cecb;
+		color: #d3d8d5;
+	}
+
+	.calendar-day.future {
+		color: #b6beb9;
 	}
 
 	.calendar-day.trained {
@@ -507,17 +730,66 @@
 	}
 
 	.calendar-day.today {
+		border-color: #1db776;
+		font-weight: 700;
+	}
+
+	.calendar-day.selected {
+		border-color: #1db776;
 		color: #ffffff;
 		background-color: #1db776;
+		font-weight: 700;
 	}
 
 	.calendar-dot {
 		position: absolute;
-		bottom: 2px;
-		width: 3px;
-		height: 3px;
+		bottom: 3px;
+		width: 4px;
+		height: 4px;
 		border-radius: 2px;
 		background-color: currentColor;
+	}
+
+	.calendar-dot.dot-active {
+		background-color: #f0a33a;
+	}
+
+	.calendar-legend {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 10px;
+		color: #8d9691;
+		font-size: 11px;
+	}
+
+	.legend-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-right: 14px;
+	}
+
+	.legend-dot {
+		width: 7px;
+		height: 7px;
+		margin-right: 5px;
+		border-radius: 4px;
+		background-color: #2cc385;
+	}
+
+	.legend-dot.legend-active {
+		background-color: #f0a33a;
+	}
+
+	.legend-ring {
+		width: 9px;
+		height: 9px;
+		margin-right: 5px;
+		border-width: 1.5px;
+		border-style: solid;
+		border-color: #1db776;
+		border-radius: 5px;
 	}
 
 	.calendar-summary {
@@ -525,27 +797,13 @@
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		margin-top: 16px;
+		margin-top: 12px;
 		padding-top: 14px;
 		border-top-width: 1px;
 		border-top-style: solid;
 		border-top-color: #eef1ef;
 		color: #6e7973;
-		font-size: 11px;
-	}
-
-	.calendar-summary-left {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-	}
-
-	.legend-dot {
-		width: 7px;
-		height: 7px;
-		margin-right: 6px;
-		border-radius: 4px;
-		background-color: #2cc385;
+		font-size: 12px;
 	}
 
 	.calendar-summary-strong {
@@ -557,8 +815,15 @@
 		font-weight: 400;
 	}
 
+	.source-note {
+		display: block;
+		margin-top: 10px;
+		color: #b5762a;
+		font-size: 11px;
+	}
+
 	.today-section {
-		padding: 20px;
+		padding: 16px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #e8ece9;
@@ -569,16 +834,42 @@
 		display: flex;
 		flex-direction: row;
 		align-items: center;
+		margin: 0;
+		padding: 4px 0 4px 8px;
 		border-width: 0;
 		background-color: transparent;
-		color: #6d7872;
-		font-size: 11px;
+		color: #25805d;
+		font-size: 12px;
+	}
+
+	.empty-card {
+		padding: 22px 16px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #d9dfdb;
+		border-radius: 18px;
+	}
+
+	.empty-title {
+		display: block;
+		color: #6e7973;
+		font-size: 14px;
+		text-align: center;
+	}
+
+	.empty-sub {
+		display: block;
+		margin-top: 6px;
+		color: #99a19d;
+		font-size: 12px;
+		text-align: center;
 	}
 
 	.workout-card {
 		display: flex;
 		flex-direction: row;
 		align-items: center;
+		margin-bottom: 10px;
 		padding: 16px;
 		border-width: 1px;
 		border-style: solid;
@@ -598,6 +889,10 @@
 		background-color: #e8f8f0;
 	}
 
+	.workout-icon.icon-active {
+		background-color: #fdf0dc;
+	}
+
 	.workout-info {
 		flex: 1;
 	}
@@ -609,28 +904,42 @@
 	}
 
 	.workout-title {
+		color: #1f2a24;
 		font-size: 15px;
+		font-weight: 600;
 	}
 
 	.status-tag {
 		margin-left: 8px;
-		padding: 3px 6px;
-		border-radius: 5px;
+		padding: 2px 7px;
+		border-radius: 6px;
 		color: #318463;
 		background-color: #edf8f3;
-		font-size: 8px;
+		font-size: 10px;
+	}
+
+	.status-tag.tag-active {
+		color: #a35f0f;
+		background-color: #fdf0dc;
+	}
+
+	.status-tag.tag-warn {
+		color: #b5483f;
+		background-color: #fceceb;
 	}
 
 	.workout-sub {
 		display: block;
 		margin: 4px 0 8px;
 		color: #89928d;
-		font-size: 10px;
+		font-size: 12px;
+		line-height: 1.5;
 	}
 
 	.meta-row {
 		display: flex;
 		flex-direction: row;
+		flex-wrap: wrap;
 	}
 
 	.meta-item {
@@ -639,7 +948,15 @@
 		align-items: center;
 		margin-right: 12px;
 		color: #77827c;
-		font-size: 9px;
+		font-size: 11px;
+	}
+
+	.workout-note {
+		display: block;
+		margin-top: 8px;
+		color: #a0aaa4;
+		font-size: 11px;
+		line-height: 1.5;
 	}
 
 	.round-arrow {
@@ -656,6 +973,15 @@
 		background-color: #fafbfa;
 	}
 
+	.start-hint {
+		display: block;
+		margin-top: 22px;
+		color: #8d9691;
+		font-size: 12px;
+		line-height: 1.6;
+		text-align: center;
+	}
+
 	.start-button {
 		display: flex;
 		flex-direction: row;
@@ -670,6 +996,14 @@
 		color: #ffffff;
 		background-color: #1cba78;
 		font-weight: 700;
+	}
+
+	.start-button.has-hint {
+		margin-top: 10px;
+	}
+
+	.start-button.is-continue {
+		background-color: #1f4433;
 	}
 
 	.start-button-icon {

@@ -1,12 +1,9 @@
 <template>
-	<view class="sheet-backdrop" @click="requestClose">
+	<view class="sheet-backdrop sheet-mask" @click="requestClose" @touchmove.stop="noop">
 		<view class="workout-sheet" @click.stop="noop">
-			<view class="sheet-handle"></view>
+			<view class="sheet-grabber"></view>
 			<view class="sheet-header">
-				<view class="sheet-header-copy">
-					<text class="section-kicker">{{ step === 'select' ? 'NEW WORKOUT' : 'TRAINING LOG' }}</text>
-					<text class="sheet-title">{{ step === 'select' ? '添加训练动作' : workTitle }}</text>
-				</view>
+				<text class="sheet-title">{{ step === 'select' ? '添加训练动作' : workTitle }}</text>
 				<button class="close-button" @click="requestClose">
 					<gym-icon name="close-muted" :size="18"></gym-icon>
 				</button>
@@ -43,18 +40,13 @@
 
 			<scroll-view class="sheet-body" scroll-y="true" v-else>
 				<view class="exercise-summary">
-					<view class="summary-top">
-						<view class="exercise-illustration">
-							<gym-icon name="dumbbell-brand" :size="30"></gym-icon>
+					<text class="summary-target">{{ targetLabel }}</text>
+					<view class="summary-row">
+						<text class="summary-progress">{{ progressLabel }}</text>
+						<view class="summary-actions">
+							<button class="summary-link primary" @click="showTarget = true">编辑目标</button>
+							<button class="summary-link" @click="step = 'select'">换动作</button>
 						</view>
-						<view class="summary-copy">
-							<text class="summary-target">{{ targetLabel }}</text>
-							<text class="summary-progress">{{ progressLabel }}</text>
-						</view>
-					</view>
-					<view class="summary-actions">
-						<button class="summary-btn primary" @click="showTarget = true">编辑目标</button>
-						<button class="summary-btn" @click="step = 'select'">换动作</button>
 					</view>
 				</view>
 
@@ -67,26 +59,23 @@
 						:key="row.id">
 						<view class="set-top">
 							<text class="set-badge">{{ row.badge }}</text>
-							<view class="kind-switch">
-								<button class="kind-btn" :class="{ active: !row.warm }" @click="setKind(row.id, 'work')">正式</button>
-								<button class="kind-btn" :class="{ active: row.warm }" @click="setKind(row.id, 'warmup')">热身</button>
-							</view>
+							<button class="kind-tag" :class="{ warm: row.warm }" @click="chooseKind(row.id)">{{ row.warm ? '热身' : '正式' }} ▾</button>
 							<view class="set-top-spacer"></view>
 							<button class="set-delete" @click="removeSet(row.id)">
-								<gym-icon name="close-muted" :size="16"></gym-icon>
+								<gym-icon name="close-muted" :size="14"></gym-icon>
 							</button>
-							<button class="set-check" :class="{ checked: row.done }" @click="toggleDone(row.id)">
-								<gym-icon name="check-white" :size="20" v-if="row.done"></gym-icon>
-							</button>
+							<button class="set-check" :class="{ checked: row.done }" @click="toggleDone(row.id)">{{ row.done ? '已完成' : '完成' }}</button>
 						</view>
 						<view class="set-fields">
 							<view class="field field-weight">
 								<input class="field-input" type="digit" confirm-type="done" :value="row.weight"
-									:placeholder="weightPlaceholder" @input="onWeightInput(row.id, $event)" />
+									:placeholder="weightPlaceholder" placeholder-style="color:#b3bbb6;font-size:15px;font-weight:400"
+									@input="onWeightInput(row.id, $event)" />
 								<text class="field-unit">kg</text>
 							</view>
 							<view class="field field-reps">
 								<input class="field-input" type="number" confirm-type="done" :value="row.reps" placeholder="次数"
+									placeholder-style="color:#b3bbb6;font-size:15px;font-weight:400"
 									@input="onRepsInput(row.id, $event)" />
 								<text class="field-unit">次</text>
 							</view>
@@ -104,25 +93,18 @@
 					<text>添加一组</text>
 				</button>
 				<view class="rest-row">
-					<view class="rest-top">
-						<view class="rest-label">
-							<gym-icon name="clock-muted" :size="20"></gym-icon>
-							<text class="rest-label-text">组间休息</text>
-						</view>
-						<button class="rest-btn" :class="{ running: restRunning }" @click="toggleRest">{{ restRunning ? '停止' : '开始计时' }}</button>
-					</view>
-					<view class="rest-adjust">
-						<button class="rest-step" :disabled="restRunning" @click="adjustRest(-15)">−</button>
-						<text class="rest-value" :class="{ running: restRunning }">{{ formatTime(restRunning ? restRemaining : restSeconds) }}</text>
-						<button class="rest-step" :disabled="restRunning" @click="adjustRest(15)">+</button>
-					</view>
+					<gym-icon name="clock-muted" :size="18"></gym-icon>
+					<text class="rest-label-text">休息</text>
+					<button class="rest-step" :disabled="restRunning" @click="adjustRest(-15)">−</button>
+					<text class="rest-value" :class="{ running: restRunning }">{{ formatTime(restRunning ? restRemaining : restSeconds) }}</text>
+					<button class="rest-step" :disabled="restRunning" @click="adjustRest(15)">+</button>
+					<button class="rest-btn" :class="{ running: restRunning }" @click="toggleRest">{{ restRunning ? '停止' : '开始' }}</button>
 				</view>
 				<view class="body-pad"></view>
 			</scroll-view>
 
 			<view class="sheet-footer" v-if="step === 'entry'">
 				<button class="save-workout" @click="onSave">保存动作</button>
-				<text class="save-hint">保存到本机并返回本次训练，不会结束整场训练</text>
 				<view class="safe-bottom"></view>
 			</view>
 		</view>
@@ -136,13 +118,15 @@
 
 <script setup lang="uts">
 	import { Exercise, SetLog, Workout, lastSetsOf } from '@/services/gym-stats.uts'
-	import { loadExercises, loadWorkouts } from '@/services/gym-api.uts'
+	import { loadExercises } from '@/services/gym-api.uts'
+	import { loadPreviousWorkouts } from '@/services/gym-days.uts'
 	import {
 		EditingDraft, ExerciseProgress, ExerciseTarget, KIND_WARMUP, KIND_WORK, RIR_UNSET, SetEntry, SessionExercise,
-		WorkoutSession, cloneExercise, exerciseProgress, formatTarget, hasInput, newSessionExercise, newSet, rirLabel,
-		saveSession, startSession, validateSet
+		WorkoutSession, cloneExercise, exerciseProgress, formatTarget, hasInput, loadSession, newSessionExercise, newSet, rirLabel,
+		saveSession, validateSet
 	} from '@/services/workout-session.uts'
 	import { confirmDialog, infoDialog } from '@/services/gym-dialog.uts'
+	import { flushCloud } from '@/services/gym-cloud.uts'
 
 	type SetRow = {
 		id : string
@@ -171,7 +155,8 @@
 
 	const emit = defineEmits(['close', 'saved'])
 
-	const session : WorkoutSession = startSession()
+	// 本弹层只编辑总览页已经打开的当前训练，从不创建训练
+	const session : WorkoutSession = loadSession()!
 	const step = ref<string>('select')
 	const work = ref<SessionExercise | null>(null)
 	let baseline = ''
@@ -252,7 +237,7 @@
 			if (restRemaining.value <= 0) {
 				clearRestTimer()
 				uni.vibrateLong({})
-				uni.showToast({ title: '休息结束，开始下一组', icon: 'none' })
+				uni.showToast({ title: '休息结束，开始下一组', icon: 'none' }) 
 			}
 		}, 1000)
 	}
@@ -297,12 +282,12 @@
 
 	const lastSets = computed(() : SetLog[] => work.value == null ? [] : lastSetsOf(history.value, work.value.exerciseId))
 
+	// 只在上次有对应正式组时显示；没有记录 / 没有对应组 / 没有 RIR 都不显示占位文案
 	function lastText(n : number) : string {
 		const list = lastSets.value
-		if (list.length == 0) return '上次 暂无记录'
-		if (n >= list.length) return '上次 无对应组'
+		if (n >= list.length) return ''
 		const l = list[n]
-		return '上次 ' + (l.weight > 0 ? l.weight + ' kg' : '自重') + ' × ' + l.reps + ' 次 · RIR 未记录'
+		return '上次 ' + (l.weight > 0 ? l.weight + ' kg' : '自重') + ' × ' + l.reps + ' 次'
 	}
 
 	const rows = computed(() : SetRow[] => {
@@ -355,9 +340,9 @@
 			loadingExercises.value = false
 			uni.showToast({ title: '动作库加载失败', icon: 'none' })
 		})
-		loadWorkouts().then((list : Workout[]) => {
+		loadPreviousWorkouts().then((list : Workout[]) => {
 			history.value = list
-		}).catch(() => { })
+		}).catch((e : unknown) => { console.error('Previous training could not be loaded', e) })
 	})
 
 	function onSearchInput(e : InputEvent) {
@@ -434,6 +419,18 @@
 		persistNow()
 	}
 
+	// 点击组类型标签后选择“正式组 / 热身组”，数据语义不变
+	function chooseKind(id : string) {
+		const s = findSet(id)
+		if (s == null) return
+		uni.showActionSheet({
+			itemList: ['正式组', '热身组'],
+			success: (res : ShowActionSheetSuccess) => {
+				setKind(id, res.tapIndex == 1 ? KIND_WARMUP : KIND_WORK)
+			}
+		})
+	}
+
 	function toggleDone(id : string) {
 		const ex = work.value
 		const s = findSet(id)
@@ -481,7 +478,10 @@
 		if (s == null) return
 		let label = ''
 		for (let i = 0; i < rows.value.length; i++) {
-			if (rows.value[i].id == id) label = rows.value[i].badge
+			if (rows.value[i].id == id) {
+				const b = rows.value[i].badge
+				label = rows.value[i].warm ? '热身第 ' + b.substring(1) + ' 组' : '第 ' + b + ' 组'
+			}
 		}
 		rirSetId.value = id
 		rirSetLabel.value = label
@@ -516,7 +516,8 @@
 		uni.showToast({ title: '目标已更新（仅本次训练）', icon: 'none' })
 	}
 
-	function onSave() {
+	async function onSave() {
+		if (closed) return
 		const ex = work.value
 		if (ex == null) return
 		for (let i = 0; i < ex.sets.length; i++) {
@@ -542,7 +543,13 @@
 			return
 		}
 		closed = true
-		uni.showToast({ title: '已保存到本机', icon: 'none' })
+		try {
+			await flushCloud()
+			uni.showToast({ title: '已保存', icon: 'none' })
+		} catch (e) {
+			console.error('Action saved locally; cloud retry required', e)
+			uni.showToast({ title: '已保存到本机，云端同步待重试', icon: 'none' })
+		}
 		emit('saved')
 	}
 
@@ -573,35 +580,27 @@
 </script>
 
 <style lang="scss">
+	@import "@/styles/sheet.scss";
+
 	.sheet-backdrop {
-		position: fixed;
-		z-index: 20;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		display: flex;
-		flex-direction: column;
-		justify-content: flex-end;
-		background-color: #13251ccc;
+		@include sheet-backdrop(20);
 	}
 
 	.workout-sheet {
-		display: flex;
-		flex-direction: column;
-		width: 100%;
+		@include sheet-panel;
 		height: 92%;
-		padding: 9px 22px 0;
-		border-radius: 28px 28px 0 0;
-		background-color: #f8faf8;
 	}
 
-	.sheet-handle {
-		width: 38px;
-		height: 14px;
-		margin: 0 auto 14px;
-		border-radius: 2px;
-		background-color: #d5dbd7;
+	/* #ifdef MP-WEIXIN */
+	/* 去掉微信 button 默认的 ::after 边框，避免与自定义样式叠加 */
+	.workout-sheet button::after {
+		border-width: 0;
+	}
+	/* #endif */
+
+	.workout-sheet button {
+		line-height: 1.4;
+		font-family: inherit;
 	}
 
 	.sheet-header {
@@ -611,22 +610,13 @@
 		justify-content: space-between;
 	}
 
-	.sheet-header-copy {
-		flex: 1;
-		margin-right: 12px;
-	}
-
-	.section-kicker {
-		display: block;
-		margin-bottom: 6px;
-		color: #7d8982;
-		font-size: 13px;
-		font-weight: 700;
-	}
-
 	.sheet-title {
-		display: block;
-		font-size: 22px;
+		flex: 1;
+		min-width: 0;
+		margin-right: 12px;
+		color: #1f2a24;
+		font-size: 20px;
+		font-weight: 700;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -649,7 +639,7 @@
 	}
 
 	.body-pad {
-		height: 20px;
+		height: 28px;
 	}
 
 	.search-box {
@@ -669,23 +659,27 @@
 	.search-input {
 		flex: 1;
 		margin-left: 9px;
+		color: #1f2a24;
 		font-size: 15px;
 	}
 
 	.category-tabs {
 		display: flex;
-		justify-content: space-evenly;
 		flex-direction: row;
+		align-items: flex-start;
+		height: 36px;
 		white-space: nowrap;
-		margin: 14px 0 6px;
+		margin: 14px 0 10px;
 	}
 
 	.category-btn {
 		display: flex;
+		flex-shrink: 0;
 		justify-content: center;
 		align-items: center;
-		margin-right: 7px;
-		padding: 7px 14px;
+		height: 34px;
+		margin: 0 8px 0 0;
+		padding: 0 16px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #e4e9e6;
@@ -693,6 +687,7 @@
 		color: #717c76;
 		background-color: #ffffff;
 		font-size: 14px;
+		line-height: 32px;
 	}
 
 	.category-btn.active {
@@ -718,6 +713,7 @@
 		width: 100%;
 		padding: 12px;
 		border-width: 0;
+		text-align: left;
 		border-bottom-width: 1px;
 		border-bottom-style: solid;
 		border-bottom-color: #edf0ee;
@@ -744,17 +740,23 @@
 
 	.exercise-copy {
 		flex: 1;
+		text-align: left;
 	}
 
 	.exercise-name {
 		display: block;
 		margin-bottom: 4px;
+		color: #1f2a24;
 		font-size: 16px;
+		font-weight: 600;
+		text-align: left;
 	}
 
 	.exercise-sub {
-		color: #949d98;
-		font-size: 13px;
+		display: block;
+		color: #8d9691;
+		font-size: 12px;
+		text-align: left;
 	}
 
 	.exercise-empty {
@@ -782,74 +784,56 @@
 	}
 
 	.exercise-summary {
-		margin: 16px 0;
-		padding: 12px;
-		border-radius: 15px;
+		margin: 12px 0 10px;
+		padding: 10px 12px;
+		border-radius: 14px;
 		background-color: #eaf7f1;
-	}
-
-	.summary-top {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-	}
-
-	.exercise-illustration {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 56px;
-		height: 56px;
-		margin-right: 12px;
-		border-radius: 13px;
-		background-color: #ffffff;
-	}
-
-	.summary-copy {
-		flex: 1;
 	}
 
 	.summary-target {
 		display: block;
 		color: #1f2a24;
-		font-size: 15px;
-		font-weight: 700;
-		line-height: 1.4;
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 1.5;
+	}
+
+	.summary-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-top: 2px;
 	}
 
 	.summary-progress {
-		display: block;
-		margin-top: 4px;
+		flex: 1;
+		min-width: 0;
+		margin-right: 8px;
 		color: #637168;
 		font-size: 13px;
+		line-height: 1.5;
 	}
 
 	.summary-actions {
 		display: flex;
 		flex-direction: row;
-		margin-top: 12px;
+		flex-shrink: 0;
 	}
 
-	.summary-btn {
-		flex: 1;
-		height: 42px;
-		margin: 0 0 0 8px;
-		padding: 0;
-		border-width: 1px;
-		border-style: solid;
-		border-color: #b9d9c9;
-		border-radius: 12px;
-		color: #25805d;
+	.summary-link {
+		margin: 0;
+		padding: 8px 0 8px 14px;
+		border-width: 0;
+		color: #7d8982;
 		background-color: transparent;
-		font-size: 15px;
+		font-size: 14px;
+		line-height: 1.4;
 	}
 
-	.summary-btn.primary {
-		margin-left: 0;
-		border-color: #1caf73;
-		color: #ffffff;
-		background-color: #1caf73;
-		font-weight: 700;
+	.summary-link.primary {
+		color: #1c8f5e;
+		font-weight: 600;
 	}
 
 	.sets-header {
@@ -861,8 +845,8 @@
 	}
 
 	.sets-title {
-		color: #526159;
-		font-size: 15px;
+		color: #1f2a24;
+		font-size: 16px;
 		font-weight: 700;
 	}
 
@@ -873,6 +857,7 @@
 		color: #348365;
 		background-color: transparent;
 		font-size: 13px;
+		line-height: 1.4;
 	}
 
 	.sets-list {
@@ -881,8 +866,8 @@
 	}
 
 	.set-card {
-		margin-bottom: 10px;
-		padding: 10px 12px 12px;
+		margin-bottom: 8px;
+		padding: 6px 12px 12px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #e7ebe8;
@@ -905,7 +890,7 @@
 		display: flex;
 		flex-direction: row;
 		align-items: center;
-		margin-bottom: 10px;
+		margin-bottom: 4px;
 	}
 
 	.set-badge {
@@ -928,33 +913,24 @@
 		background-color: #28b77a;
 	}
 
-	.kind-switch {
-		display: flex;
-		flex-direction: row;
-		padding: 2px;
-		border-radius: 10px;
-		background-color: #eef1ef;
-	}
-
-	.kind-btn {
+	.kind-tag {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 48px;
-		height: 30px;
+		height: 32px;
 		margin: 0;
-		padding: 0;
+		padding: 0 10px;
 		border-width: 0;
-		border-radius: 8px;
-		color: #717c76;
-		background-color: transparent;
+		border-radius: 9px;
+		color: #25805d;
+		background-color: #e6f5ed;
 		font-size: 13px;
+		line-height: 32px;
 	}
 
-	.kind-btn.active {
-		color: #1f2a24;
-		background-color: #ffffff;
-		font-weight: 700;
+	.kind-tag.warm {
+		color: #a35f0f;
+		background-color: #fdf0dc;
 	}
 
 	.set-top-spacer {
@@ -965,30 +941,35 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 40px;
-		height: 40px;
-		margin: 0 4px 0 0;
+		width: 44px;
+		height: 44px;
+		margin: 0 10px 0 0;
 		padding: 0;
 		border-width: 0;
 		background-color: transparent;
+		opacity: 0.55;
 	}
 
 	.set-check {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 44px;
-		height: 44px;
+		min-width: 76px;
+		height: 40px;
 		margin: 0;
-		padding: 0;
+		padding: 0 14px;
 		border-width: 1px;
 		border-style: solid;
-		border-color: #dce4df;
+		border-color: #1caa70;
 		border-radius: 12px;
-		background-color: #f6f8f7;
+		color: #1c8f5e;
+		background-color: #ffffff;
+		font-size: 14px;
+		font-weight: 600;
 	}
 
 	.set-check.checked {
+		color: #ffffff;
 		background-color: #28b77a;
 		border-color: #28b77a;
 	}
@@ -1025,7 +1006,9 @@
 		flex: 1;
 		min-width: 0;
 		height: 44px;
-		font-size: 17px;
+		color: #1f2a24;
+		font-size: 18px;
+		font-weight: 600;
 		text-align: center;
 	}
 
@@ -1102,45 +1085,25 @@
 
 	.rest-row {
 		display: flex;
-		flex-direction: column;
-		margin-top: 16px;
-		padding: 14px;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 12px;
+		padding: 8px 10px;
 		border-radius: 13px;
 		background-color: #edf2ef;
 	}
 
-	.rest-top {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.rest-label {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		flex: 1;
-	}
-
 	.rest-label-text {
+		flex: 1;
 		margin-left: 6px;
 		color: #637168;
-		font-size: 15px;
-	}
-
-	.rest-adjust {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-		margin-top: 10px;
+		font-size: 14px;
 	}
 
 	.rest-value {
-		min-width: 110px;
+		min-width: 64px;
 		color: #1f2a24;
-		font-size: 28px;
+		font-size: 20px;
 		font-weight: 700;
 		text-align: center;
 	}
@@ -1153,24 +1116,32 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 44px;
-		height: 44px;
+		width: 40px;
+		height: 40px;
+		margin: 0;
 		padding: 0;
 		border-width: 0;
-		border-radius: 22px;
+		border-radius: 20px;
 		color: #287b5a;
 		background-color: #ffffff;
-		font-size: 24px;
+		font-size: 22px;
+		line-height: 40px;
 	}
 
 	.rest-btn {
-		margin: 0;
-		padding: 7px 14px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 60px;
+		height: 40px;
+		margin: 0 0 0 10px;
+		padding: 0 12px;
 		border-width: 0;
-		border-radius: 9px;
+		border-radius: 10px;
 		color: #287b5a;
 		background-color: #ffffff;
 		font-size: 14px;
+		font-weight: 600;
 	}
 
 	.rest-btn.running {
@@ -1188,21 +1159,13 @@
 
 	.save-workout {
 		width: 100%;
-		padding: 15px;
+		padding: 14px;
 		border-width: 0;
 		border-radius: 14px;
 		color: #ffffff;
 		background-color: #1db676;
 		font-size: 17px;
 		font-weight: 700;
-	}
-
-	.save-hint {
-		display: block;
-		margin-top: 8px;
-		color: #8d9691;
-		font-size: 12px;
-		text-align: center;
 	}
 
 	.safe-bottom {

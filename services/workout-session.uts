@@ -1,4 +1,5 @@
 import { Exercise, formatDate, round1 } from './gym-stats.uts'
+import { canUseLocal, cloudRevision, cloudRows, cloudStatus, cloudValue, queueCloud } from './gym-cloud.uts'
 
 // 本机训练会话：所有“目标 / 组类型 / 实际 RIR / 完成状态”仅保存在本机，字段含义见 docs/workout-session-phase1.md
 export const SESSION_VERSION = 1
@@ -52,6 +53,7 @@ export type EditingDraft = {
 }
 
 export type WorkoutSession = {
+	cloudRevision ?: number
 	version : number
 	id : string
 	date : string
@@ -387,21 +389,59 @@ function repairSession(s : WorkoutSession) : WorkoutSession {
 // 版本不匹配时返回 null 且不会删除原数据
 export function loadSession() : WorkoutSession | null {
 	const raw = readJson(SESSION_KEY)
-	if (raw == null) return null
+	if (raw == null) return remoteSessions().find((s : WorkoutSession) : boolean => s.status == 'active') ?? null
 	const s = raw as WorkoutSession
 	if (s.version != SESSION_VERSION || s.exercises == null) return null
-	return repairSession(s)
+	if (!canUseLocal('session', s.id)) return null
+	const remote = cloudValue('session', s.id)
+	if (remote != null) return withSyncState(repairSession(remote as WorkoutSession))
+	return withSyncState(repairSession(s))
+}
+
+function withSyncState(s : WorkoutSession) : WorkoutSession {
+	const status = cloudStatus('session', s.id)
+	if (status != 'none') {
+		s.cloudStatus = status
+		s.cloudRevision = cloudRevision('session', s.id)
+	}
+	return s
+}
+
+function remoteSessions() : WorkoutSession[] {
+	const rows = cloudRows('session')
+	const out : WorkoutSession[] = []
+	for (let i = 0; i < rows.length; i++) {
+		const s = rows[i].value as WorkoutSession
+		if (s != null && s.version == SESSION_VERSION && s.exercises != null) out.push(withSyncState(repairSession(s)))
+	}
+	out.sort((a : WorkoutSession, b : WorkoutSession) : number => b.startedAt - a.startedAt)
+	return out
 }
 
 export function saveSession(s : WorkoutSession) : boolean {
 	s.updatedAt = Date.now()
-	return writeJson(SESSION_KEY, s)
+	s.cloudStatus = 'pending'
+	// Full-session persistence no longer appends exercises into a date-level aggregate.
+	s.durationSent = false
+	if (!writeJson(SESSION_KEY, s)) return false
+	try {
+		queueCloud('session', s.id, JSON.stringify(s), false, s.cloudRevision ?? 0)
+		return true
+	} catch (e) {
+		console.error('Session retained locally; sync journal failed', e)
+		return false
+	}
 }
 
 export function clearSession() {
 	try {
+		const s = loadSession()
+		if (s != null && cloudStatus('session', s.id) != 'none') queueCloud('session', s.id, '{}', true)
 		uni.removeStorageSync(SESSION_KEY)
-	} catch (e) { }
+	} catch (e) {
+		console.error('Could not discard session', e)
+		uni.showToast({ title: '草稿移除失败，请重试', icon: 'none' })
+	}
 }
 
 // none | active | finished | finished-failed
@@ -412,28 +452,93 @@ export function peekSessionStatus() : string {
 	return s.cloudStatus == 'failed' ? 'finished-failed' : 'finished'
 }
 
-function archiveSession(s : WorkoutSession) {
+function readHistory() : WorkoutSession[] {
 	const raw = readJson(HISTORY_KEY)
-	const list : WorkoutSession[] = raw == null ? [] : (raw as WorkoutSession[])
-	list.unshift(s)
-	while (list.length > HISTORY_LIMIT) list.pop()
-	writeJson(HISTORY_KEY, list)
+	const out : WorkoutSession[] = []
+	const list = raw == null ? [] : raw as WorkoutSession[]
+	for (let i = 0; i < list.length; i++) {
+		const s = list[i]
+		if (s.version != SESSION_VERSION || s.exercises == null) continue
+		if (!canUseLocal('session', s.id)) continue
+		const remote = cloudValue('session', s.id)
+		out.push(withSyncState(repairSession(remote != null ? remote as WorkoutSession : s)))
+	}
+	const remote = remoteSessions()
+	for (let i = 0; i < remote.length; i++) {
+		if (!out.some((s : WorkoutSession) : boolean => s.id == remote[i].id)) out.push(remote[i])
+	}
+	return out
 }
 
-// 继续进行中的训练；上一场已结束则先移入本机历史再新建
-export function startSession() : WorkoutSession {
+// 本机历史归档（已结束训练，以及被让位后保留的未结束草稿）；只读
+export function loadHistorySessions() : WorkoutSession[] {
+	return readHistory()
+}
+
+// 当前会话 + 本机历史归档，供首页日历 / 日详情展示；只读，不改写任何数据
+export function loadLocalSessions() : WorkoutSession[] {
+	const out : WorkoutSession[] = []
 	const cur = loadSession()
-	if (cur != null) {
-		if (cur.status == 'active') return cur
-		archiveSession(cur)
+	if (cur != null) out.push(cur)
+	const list = readHistory()
+	for (let i = 0; i < list.length; i++) out.push(list[i])
+	return out
+}
+
+// 超过上限时先丢弃最旧的已结束记录；未结束的草稿不会被自动丢弃
+function trimHistory(list : WorkoutSession[]) {
+	while (list.length > HISTORY_LIMIT) {
+		let drop = -1
+		for (let i = list.length - 1; i >= 0; i--) {
+			if (list[i].status != 'active' && list[i].cloudStatus == 'synced' && (list[i].cloudRevision ?? 0) > 0) {
+				drop = i
+				break
+			}
+		}
+		if (drop < 0) return
+		list.splice(drop, 1)
 	}
-	const now = Date.now()
+}
+
+function archiveSession(s : WorkoutSession) : boolean {
+	const list = readHistory()
+	const old = list.findIndex((x : WorkoutSession) : boolean => x.id == s.id)
+	if (old >= 0) list.splice(old, 1)
+	list.unshift(s)
+	trimHistory(list)
+	return writeJson(HISTORY_KEY, list)
+}
+
+// 当前会话与本机历史中，开始日期为 date 的未结束训练（当前会话优先）
+export function findActiveOn(date : string) : WorkoutSession | null {
+	const cur = loadSession()
+	if (cur != null && cur.status == 'active' && cur.date == date) return cur
+	const list = readHistory()
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].status == 'active' && list[i].date == date) return list[i]
+	}
+	return null
+}
+
+// 开始今天的新训练。日期与开始时间只取自传入的时钟 now（调用方在点击时取当前本地时间），不接受任何外部日期。
+// - 今天已有未结束的训练时直接返回它，不重复新建；
+// - 其他日期的未结束草稿、上一场已结束的训练会被移入本机历史，不会被覆盖或删除。
+export function createSession(now : Date) : WorkoutSession {
+	const today = formatDate(now)
+	const same = findActiveOn(today)
+	if (same != null) return activateSession(same.id) ?? same
+	const cur = loadSession()
+	if (cur != null && !archiveSession(cur)) {
+		uni.showToast({ title: '旧草稿保留失败，未开始新训练', icon: 'none' })
+		throw new Error('ARCHIVE_FAILED')
+	}
+	const t = now.getTime()
 	const s = {
 		version: SESSION_VERSION,
 		id: genId('ws'),
-		date: formatDate(new Date()),
-		startedAt: now,
-		updatedAt: now,
+		date: today,
+		startedAt: t,
+		updatedAt: t,
 		finishedAt: 0,
 		status: 'active',
 		exercises: [],
@@ -445,8 +550,38 @@ export function startSession() : WorkoutSession {
 	return s
 }
 
-// 结束整场训练，返回 'empty' | 'recorded'。没有任何已完成的组时直接丢弃，不产生记录
+// 把指定训练设为当前会话（保持原 ID、开始时间与日期不变）。
+// 原当前会话（无论是否已结束）先移入本机历史；找不到时返回 null，不创建任何新训练。
+export function activateSession(id : string) : WorkoutSession | null {
+	const cur = loadSession()
+	if (cur != null && cur.id == id) return cur
+	const list = readHistory()
+	const idx = list.findIndex((x : WorkoutSession) : boolean => x.id == id)
+	if (idx < 0) return null
+	const target = list[idx]
+	// Persist both identities before replacing the current slot. Failure may duplicate, never lose a draft.
+	if (cur != null && cur.id != target.id) {
+		const old = list.findIndex((x : WorkoutSession) : boolean => x.id == cur.id)
+		if (old >= 0) list.splice(old, 1)
+		list.unshift(cur)
+	}
+	if (!writeJson(HISTORY_KEY, list)) {
+		uni.showToast({ title: '草稿切换失败，原数据已保留', icon: 'none' })
+		return null
+	}
+	if (!writeJson(SESSION_KEY, target)) return null
+	const duplicate = list.findIndex((x : WorkoutSession) : boolean => x.id == target.id)
+	if (duplicate >= 0) list.splice(duplicate, 1)
+	trimHistory(list)
+	writeJson(HISTORY_KEY, list)
+	return target
+}
+
+// 结束整场训练，返回 'empty' | 'recorded' | 'stale'。没有任何已完成的组时直接丢弃，不产生记录。
+// 只有当前会话中未结束的那一场可以被结束，已结束或其他训练不会被改写。
 export function finishSession(s : WorkoutSession) : string {
+	const cur = loadSession()
+	if (cur == null || cur.id != s.id || cur.status != 'active') return 'stale'
 	const t = sessionTotals(s)
 	if (t.workDone + t.warmupDone == 0) {
 		clearSession()

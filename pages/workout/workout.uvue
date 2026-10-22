@@ -1,10 +1,19 @@
 <template>
 	<view class="workout-page">
-		<gym-workout-overview></gym-workout-overview>
+		<gym-workout-overview v-if="ready" :session-id="sessionId"></gym-workout-overview>
 	</view>
 </template>
 
 <script setup lang="uts">
+	// 路由参数 id：要打开的已有训练。页面不会创建训练；没有 id 时只显示当前会话。
+	const sessionId = ref<string>('')
+	const ready = ref<boolean>(false)
+
+	onLoad((options : OnLoadOptions) => {
+		const opts = options as any
+		sessionId.value = (opts['id'] ?? '') as string
+		ready.value = true
+	})
 </script>
 
 <style lang="scss">

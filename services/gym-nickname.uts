@@ -1,0 +1,26 @@
+import { canUseLocal, cloudValue, queueCloud } from './gym-cloud.uts'
+
+export const NICKNAME_MAX = 20
+
+// 昵称只来自云端（绑定微信身份）；未连接时显示占位，不在本机伪造身份。
+export function loadNickname() : string {
+	const remote = cloudValue('profile', 'user')
+	if (remote == null || !canUseLocal('profile', 'user')) return ''
+	const name = remote['nickname']
+	return typeof name == 'string' ? name : ''
+}
+
+export function validateNickname(raw : string) : string {
+	const name = raw.trim()
+	if (name.length == 0) return '昵称不能为空'
+	if (Array.from(name).length > NICKNAME_MAX) return '昵称最多 ' + NICKNAME_MAX + ' 个字'
+	if (/[\u0000-\u001f\u007f]/.test(name)) return '昵称包含无法使用的字符'
+	return ''
+}
+
+export function saveNickname(raw : string) : boolean {
+	const name = raw.trim()
+	if (validateNickname(name) != '') return false
+	queueCloud('profile', 'user', JSON.stringify({ nickname: name, auto: false }))
+	return true
+}

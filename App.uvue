@@ -1,4 +1,5 @@
 <script setup lang="uts">
+	import { flushCloud, refreshCloudData } from '@/services/gym-cloud.uts'
 	// #ifdef APP-ANDROID || APP-HARMONY
 	let firstBackTime = 0
 	// #endif
@@ -15,14 +16,17 @@
       traceUser: true
     })
 		console.log('Cloud initialized')
+		refreshCloudData().catch((e : unknown) => console.error('Initial cloud load failed', e))
 	})
 
 	onAppShow(() => {
 		console.log('App Show')
+		refreshCloudData().catch((e : unknown) => console.error('Foreground cloud load failed', e))
 	})
 
 	onAppHide(() => {
 		console.log('App Hide')
+		flushCloud().catch((e : unknown) => console.error('Background sync retained locally', e))
 	})
 
 	// #ifdef APP-ANDROID || APP-HARMONY

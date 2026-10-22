@@ -1,19 +1,21 @@
 <template>
-	<view class="rir-backdrop" @click.stop="onClose">
+	<view class="rir-backdrop sheet-mask-light" @click.stop="onClose" @touchmove.stop="noop">
 		<view class="rir-sheet" @click.stop="noop">
-			<view class="rir-handle"></view>
+			<view class="sheet-grabber"></view>
 			<view class="rir-header">
-				<text class="rir-title">实际 RIR · 第 {{ setLabel }} 组</text>
+				<text class="rir-title">{{ setLabel }} · 实际 RIR</text>
 				<button class="rir-close" @click="onClose">
 					<gym-icon name="close-muted" :size="18"></gym-icon>
 				</button>
 			</view>
-			<text class="rir-help">剩余次数 RIR：完成这一组后，你估计还能以相同动作标准再做几次？例如，选择 2，表示大约还能做 2 次。</text>
+			<text class="rir-help">这组结束后，还能规范完成几次？</text>
 			<view class="rir-options">
 				<button class="rir-option" :class="{ selected: value === opt.code }" v-for="opt in options" :key="opt.code"
 					@click="onPick(opt.code)">{{ opt.label }}</button>
 			</view>
-			<button class="rir-clear" :disabled="value === ''" @click="onPick('')">清除选择</button>
+			<view class="rir-footer" v-if="value !== ''">
+				<button class="rir-clear" @click="onPick('')">清除选择</button>
+			</view>
 			<view class="rir-safe"></view>
 		</view>
 	</view>
@@ -25,6 +27,7 @@
 		label : string
 	}
 
+	// setLabel 为完整的组名，例如“第 2 组”“热身第 1 组”
 	const { value = '', setLabel = '' } = defineProps<{
 		value ?: string
 		setLabel ?: string
@@ -51,37 +54,31 @@
 	}
 
 	function noop() {
-		// 阻止点击面板内容时冒泡到背景层
+		// 阻止点击面板内容时冒泡到背景层，同时拦截背景滚动
 	}
 </script>
 
 <style lang="scss">
+	@import "@/styles/sheet.scss";
+
 	.rir-backdrop {
-		position: fixed;
-		z-index: 40;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		display: flex;
-		flex-direction: column;
-		justify-content: flex-end;
-		background-color: #13251ccc;
+		@include sheet-backdrop(40);
 	}
 
 	.rir-sheet {
-		width: 100%;
-		padding: 9px 22px 16px;
-		border-radius: 28px 28px 0 0;
-		background-color: #f8faf8;
+		@include sheet-panel;
+		padding-bottom: 16px;
 	}
 
-	.rir-handle {
-		width: 38px;
-		height: 14px;
-		margin: 0 auto 12px;
-		border-radius: 2px;
-		background-color: #d5dbd7;
+	/* #ifdef MP-WEIXIN */
+	.rir-sheet button::after {
+		border-width: 0;
+	}
+	/* #endif */
+
+	.rir-sheet button {
+		line-height: 1.4;
+		font-family: inherit;
 	}
 
 	.rir-header {
@@ -92,6 +89,7 @@
 	}
 
 	.rir-title {
+		color: #1f2a24;
 		font-size: 19px;
 		font-weight: 700;
 	}
@@ -102,6 +100,8 @@
 		justify-content: center;
 		width: 36px;
 		height: 36px;
+		margin: 0;
+		padding: 0;
 		border-width: 0;
 		border-radius: 18px;
 		background-color: #e9edea;
@@ -109,10 +109,9 @@
 
 	.rir-help {
 		display: block;
-		margin: 12px 0 16px;
-		color: #637168;
+		margin: 6px 0 16px;
+		color: #7d8982;
 		font-size: 14px;
-		line-height: 1.6;
 	}
 
 	.rir-options {
@@ -145,17 +144,19 @@
 		font-weight: 700;
 	}
 
+	.rir-footer {
+		display: flex;
+		flex-direction: row;
+		justify-content: flex-end;
+	}
+
 	.rir-clear {
-		width: 100%;
-		height: 46px;
-		margin-top: 2px;
-		border-width: 1px;
-		border-style: solid;
-		border-color: #c4cec8;
-		border-radius: 12px;
-		color: #526159;
+		margin: 0;
+		padding: 8px 4px;
+		border-width: 0;
+		color: #7d8982;
 		background-color: transparent;
-		font-size: 15px;
+		font-size: 14px;
 	}
 
 	.rir-safe {

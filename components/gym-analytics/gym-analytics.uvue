@@ -1,83 +1,48 @@
 <template>
-	<view>
+	<view class="an-root">
+		<scroll-view class="app-content" scroll-y="true">
 		<view class="page-header">
 			<text class="eyebrow">你的训练表现</text>
 			<text class="heading-1">数据统计</text>
 		</view>
 
+		<view class="demo-banner" v-if="demoMode">
+			<text class="demo-banner-title">演示数据</text>
+			<text class="demo-banner-text">当前页面显示的是本地生成的示例数据，不是你的真实训练记录，也不会读写云端。把 services/gym-demo.uts 中的 DEMO_MODE 改为 false 即可恢复真实数据。</text>
+		</view>
+		<text class="load-note" v-else-if="cloudState === 'failed'">云端训练记录加载失败，当前仅显示本机记录。</text>
+
 		<view class="stat-grid">
-			<view class="stat-card">
-				<text class="stat-label">总训练</text>
-				<text class="stat-value">{{ overview.count }}<text class="stat-unit"> 次</text></text>
+			<view class="stat-card first">
+				<text class="stat-label">训练天数</text>
+				<text class="stat-value">{{ overview.days }}<text class="stat-unit"> 天</text></text>
 				<text class="stat-meta">近 90 天</text>
 			</view>
 			<view class="stat-card">
 				<text class="stat-label">训练容量</text>
-				<text class="stat-value">{{ overview.tons }}<text class="stat-unit"> 吨</text></text>
-				<text class="stat-meta positive" v-if="overview.hasPrev">{{ overview.tonsChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(overview.tonsChangePct) }}%</text>
-				<text class="stat-meta" v-else>暂无对比</text>
+				<text class="stat-value">{{ volumeText.value }}<text class="stat-unit"> {{ volumeText.unit }}</text></text>
+				<text class="stat-meta positive" v-if="overview.hasPrev">{{ overview.tonsChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(overview.tonsChangePct) }}% 较前 90 天</text>
+				<text class="stat-meta" v-else>近 90 天</text>
 			</view>
 			<view class="stat-card">
 				<text class="stat-label">训练时长</text>
-				<text class="stat-value">{{ overview.hours }}<text class="stat-unit"> h</text></text>
-				<text class="stat-meta">平均 {{ overview.avgMinutes }} 分钟</text>
+				<text class="stat-value">{{ durationText.value }}<text class="stat-unit" v-if="durationText.unit !== ''"> {{ durationText.unit }}</text></text>
+				<text class="stat-meta">{{ avgText }}</text>
 			</view>
 		</view>
 
-		<view class="section-block analytics-card">
-			<view class="section-heading">
-				<view>
-					<text class="section-kicker">CONSISTENCY</text>
-					<text class="section-title">训练频率</text>
-				</view>
-				<picker mode="selector" :range="periods" :value="periodIndex" @change="onPeriodChange">
-					<view class="period-select">{{ periods[periodIndex] }}</view>
-				</picker>
-			</view>
-			<view class="heatmap">
-				<view class="heat-cell" :class="'heat-' + value" v-for="(value, idx) in heatValues" :key="idx"></view>
-			</view>
-			<view class="heatmap-labels">
-				<text class="heatmap-month">{{ heatLabels[0] }}</text>
-				<text class="heatmap-month">{{ heatLabels[1] }}</text>
-				<text class="heatmap-month">{{ heatLabels[2] }}</text>
-				<view class="heatmap-legend">
-					<text>少</text>
-					<view class="heat-cell heat-1"></view>
-					<view class="heat-cell heat-3"></view>
-					<text>多</text>
-				</view>
-			</view>
-		</view>
+		<gym-heatmap :entries="entries" :today="today" :demo="demoMode"></gym-heatmap>
 
-		<view class="section-block analytics-card">
-			<view class="section-heading">
-				<view>
-					<text class="section-kicker">STRENGTH</text>
-					<text class="section-title">卧推趋势</text>
-				</view>
-				<text class="pr-chip">PR {{ trend.pr }} kg</text>
-			</view>
-			<view class="chart-value">
-				<text class="chart-value-strong">{{ trend.totalVolume }}</text>
-				<text class="chart-value-unit">kg 总容量</text>
-			</view>
-			<view class="bar-chart">
-				<view class="bar-col" v-for="bar in trend.bars" :key="bar.label">
-					<view class="bar" :style="{ height: bar.height + 'px' }"></view>
-				</view>
-			</view>
-			<view class="chart-labels">
-				<text v-for="bar in trend.bars" :key="bar.label">{{ bar.label }}</text>
-			</view>
-		</view>
+		<gym-exercise-performance :entries="entries" :library="library" :today="today" :demo="demoMode"
+			@open-picker="onOpenPicker"></gym-exercise-performance>
 
-		<view class="section-block analytics-card">
+		<view class="analytics-card">
 			<view class="section-heading">
 				<view>
 					<text class="section-kicker">BALANCE</text>
 					<text class="section-title">部位分布</text>
 				</view>
+				<text class="demo-tag" v-if="demoMode">演示数据</text>
 			</view>
 			<view class="muscle-bar">
 				<view class="muscle-seg" :class="muscleColors[idx]" :style="{ width: share.percent + '%' }"
@@ -97,71 +62,128 @@
 				</view>
 			</view>
 		</view>
+		</scroll-view>
+
+		<!-- 弹层放在 scroll-view 之外，避免 iOS 真机上 fixed 被滚动容器限制成内容宽度 -->
+		<gym-exercise-picker v-if="showPicker" :options="pickerOptions" :selected-id="pickerSelected"
+			@select="onPickExercise" @close="showPicker = false"></gym-exercise-picker>
 	</view>
 </template>
 
 <script setup lang="uts">
-	import { ExerciseTrend, MuscleStats, Overview, Workout, addDays, calcExerciseTrend, calcHeatmap, calcMuscleStats, calcOverview } from '@/services/gym-stats.uts'
-	import { loadWorkouts } from '@/services/gym-api.uts'
+	import { Exercise, Workout, formatDate } from '@/services/gym-stats.uts'
+	import { loadExercises, loadWorkouts } from '@/services/gym-api.uts'
+	import { WorkoutSession, loadHistorySessions, loadSession } from '@/services/workout-session.uts'
+	import { DayEntry, buildDayEntries } from '@/services/gym-calendar.uts'
+	import { ExerciseOption, MuscleStats, Overview, ValueUnit, calcMuscleStats, calcOverview, formatDuration, formatVolume } from '@/services/gym-insights.uts'
+	import { DEMO_MODE, demoExercises, demoSessions } from '@/services/gym-demo.uts'
 
-	const BENCH_ID = 'chest-01'
+	type PickerPayload = {
+		options : ExerciseOption[]
+		selectedId : string
+	}
+
 	const muscleColors : string[] = ['green', 'blue', 'orange', 'gray']
+	const demoMode : boolean = DEMO_MODE
 
 	const workouts = ref<Workout[]>([])
-	const today = ref<Date>(new Date())
+	const sessions = ref<WorkoutSession[]>([])
+	const exercises = ref<Exercise[]>([])
+	// loading | ok | failed
+	const cloudState = ref<string>('loading')
+	const today = ref<string>(formatDate(new Date()))
 
-	const periods = ref<string[]>(['近 12 周', '近 20 周'])
-	const periodIndex = ref(0)
-	const periodDays = computed(() : number => periodIndex.value == 0 ? 84 : 140)
+	// 动作选择弹层由本组件（scroll-view 之外）渲染，动作表现卡片通过事件请求打开、通过事件接收选择
+	const showPicker = ref<boolean>(false)
+	const pickerOptions = ref<ExerciseOption[]>([])
+	const pickerSelected = ref<string>('')
 
-	const overview = computed(() : Overview => calcOverview(workouts.value, today.value))
-	const heatValues = computed(() : number[] => calcHeatmap(workouts.value, today.value, periodDays.value))
-	const trend = computed(() : ExerciseTrend => calcExerciseTrend(workouts.value, BENCH_ID, today.value, 4))
-	const muscle = computed(() : MuscleStats => calcMuscleStats(workouts.value, today.value))
+	function onOpenPicker(p : PickerPayload) {
+		pickerOptions.value = p.options
+		pickerSelected.value = p.selectedId
+		showPicker.value = true
+	}
 
-	const heatLabels = computed(() : string[] => {
-		const n = periodDays.value
-		const pick = (back : number) : string => (addDays(today.value, -back).getMonth() + 1) + '月'
-		return [pick(n - 1), pick(Math.round(n / 2)), pick(0)]
+	function onPickExercise(id : string) {
+		showPicker.value = false
+		uni.$emit('exercise-performance-pick', id)
+	}
+
+	// 热力图、动作表现、概览、部位分布共用这一份记录（与首页同一数据源和计入规则）。
+	// 演示模式只使用本地生成的演示会话，不读取真实历史。
+	const entries = computed(() : DayEntry[] => {
+		if (demoMode) return buildDayEntries([], demoSessions(today.value), true)
+		return buildDayEntries(workouts.value, sessions.value, cloudState.value == 'ok')
 	})
+	const library = computed(() : Exercise[] => demoMode ? demoExercises() : exercises.value)
 
-	function refresh() {
-		today.value = new Date()
+	const overview = computed(() : Overview => calcOverview(entries.value, today.value))
+	const muscle = computed(() : MuscleStats => calcMuscleStats(entries.value, today.value))
+	const volumeText = computed(() : ValueUnit => formatVolume(overview.value.volumeKg))
+	const durationText = computed(() : ValueUnit => formatDuration(overview.value.minutes))
+	const avgText = computed(() : string => overview.value.minutes > 0 && overview.value.days > 0 ? '平均 ' + overview.value.avgMinutes + ' 分钟 / 次' : '暂无时长记录')
+
+	function refreshLocal() {
+		today.value = formatDate(new Date())
+		if (demoMode) return
+		const out : WorkoutSession[] = []
+		const cur = loadSession()
+		if (cur != null) out.push(cur)
+		const hist = loadHistorySessions()
+		for (let i = 0; i < hist.length; i++) out.push(hist[i])
+		sessions.value = out
+	}
+
+	function refreshCloud() {
+		if (demoMode) return
 		loadWorkouts().then((list : Workout[]) => {
 			workouts.value = list
+			cloudState.value = 'ok'
 		}).catch(() => {
+			cloudState.value = 'failed'
 			uni.showToast({ title: '统计数据加载失败', icon: 'none' })
 		})
 	}
 
+	function refreshLibrary() {
+		if (demoMode) return
+		loadExercises().then((list : Exercise[]) => {
+			exercises.value = list
+		}).catch(() => {
+			exercises.value = []
+		})
+	}
+
 	function onSaved() {
-		refresh()
+		refreshLocal()
+		refreshCloud()
 	}
 
 	onMounted(() => {
-		refresh()
+		refreshLocal()
+		refreshCloud()
+		refreshLibrary()
 		uni.$on('workout-saved', onSaved)
+		uni.$on('workout-session-changed', refreshLocal)
 	})
 
 	onUnmounted(() => {
 		uni.$off('workout-saved', onSaved)
+		uni.$off('workout-session-changed', refreshLocal)
 	})
-
-	type PickerChangeEventDetail = {
-		value : string
-	}
-	type PickerChangeEvent = {
-		detail : PickerChangeEventDetail
-	}
-
-	function onPeriodChange(e : PickerChangeEvent) {
-		periodIndex.value = parseInt(e.detail.value)
-	}
 </script>
 
 <style lang="scss">
+	@import "@/styles/analytics-card.scss";
+	@import "@/styles/page-layout.scss";
+
+	.an-root {
+		width: 100%;
+		height: 100%;
+	}
+
 	.page-header {
-		padding: 34px 2px 22px;
+		padding: 4px 2px 22px;
 	}
 
 	.eyebrow {
@@ -176,6 +198,35 @@
 		font-size: 25px;
 	}
 
+	.demo-banner {
+		margin-bottom: 14px;
+		padding: 12px 14px;
+		border-radius: 14px;
+		background-color: #fdf0dc;
+	}
+
+	.demo-banner-title {
+		display: block;
+		color: #a35f0f;
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.demo-banner-text {
+		display: block;
+		margin-top: 4px;
+		color: #8a5a1e;
+		font-size: 12px;
+		line-height: 1.6;
+	}
+
+	.load-note {
+		display: block;
+		margin-bottom: 12px;
+		color: #b5762a;
+		font-size: 12px;
+	}
+
 	.stat-grid {
 		display: flex;
 		flex-direction: row;
@@ -183,8 +234,9 @@
 
 	.stat-card {
 		flex: 1;
-		margin-right: 9px;
-		padding: 15px 12px;
+		min-width: 0;
+		margin-left: 8px;
+		padding: 14px 12px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #e7ebe8;
@@ -192,10 +244,14 @@
 		background-color: #ffffff;
 	}
 
+	.stat-card.first {
+		margin-left: 0;
+	}
+
 	.stat-label {
 		display: block;
 		color: #89938d;
-		font-size: 9px;
+		font-size: 11px;
 	}
 
 	.stat-value {
@@ -205,169 +261,19 @@
 	}
 
 	.stat-unit {
-		font-size: 10px;
+		margin-left: 3px;
+		font-size: 11px;
 		font-weight: 500;
 	}
 
 	.stat-meta {
 		display: block;
 		color: #9ca49f;
-		font-size: 8px;
+		font-size: 10px;
 	}
 
 	.stat-meta.positive {
 		color: #17a669;
-	}
-
-	.analytics-card {
-		margin-top: 14px;
-		padding: 20px;
-		border-width: 1px;
-		border-style: solid;
-		border-color: #e9edea;
-		border-radius: 22px;
-		background-color: #ffffff;
-	}
-
-	.section-heading {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 17px;
-	}
-
-	.section-kicker {
-		display: block;
-		margin-bottom: 6px;
-		color: #7d8982;
-		font-size: 11px;
-		font-weight: 700;
-	}
-
-	.section-title {
-		font-size: 18px;
-	}
-
-	.period-select {
-		padding: 7px 9px;
-		border-width: 1px;
-		border-style: solid;
-		border-color: #e2e7e4;
-		border-radius: 9px;
-		color: #69746e;
-		background-color: #ffffff;
-		font-size: 10px;
-	}
-
-	.heatmap {
-		display: flex;
-		flex-direction: column;
-		flex-wrap: wrap;
-		height: 91px;
-	}
-
-	.heat-cell {
-		width: 9px;
-		height: 9px;
-		margin-right: 4px;
-		margin-bottom: 4px;
-		border-radius: 2px;
-		background-color: #edf1ee;
-	}
-
-	.heat-1 {
-		background-color: #c8efdc;
-	}
-
-	.heat-2 {
-		background-color: #7ed5ac;
-	}
-
-	.heat-3 {
-		background-color: #38b97d;
-	}
-
-	.heat-4 {
-		background-color: #168d59;
-	}
-
-	.heatmap-labels {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		margin-top: 10px;
-		color: #a0a8a3;
-		font-size: 8px;
-	}
-
-	.heatmap-month {
-		margin-right: 58px;
-	}
-
-	.heatmap-legend {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		margin-left: auto;
-	}
-
-	.heatmap-legend .heat-cell {
-		margin: 0 4px;
-	}
-
-	.pr-chip {
-		padding: 6px 9px;
-		border-radius: 8px;
-		color: #168c59;
-		background-color: #e8f8f0;
-		font-size: 9px;
-		font-weight: 700;
-	}
-
-	.chart-value {
-		display: flex;
-		flex-direction: row;
-		align-items: baseline;
-	}
-
-	.chart-value-strong {
-		margin-right: 7px;
-		font-size: 24px;
-	}
-
-	.chart-value-unit {
-		color: #939c97;
-		font-size: 9px;
-	}
-
-	.bar-chart {
-		display: flex;
-		flex-direction: row;
-		align-items: flex-end;
-		height: 96px;
-		margin-top: 8px;
-	}
-
-	.bar-col {
-		display: flex;
-		flex: 1;
-		align-items: center;
-		justify-content: flex-end;
-	}
-
-	.bar {
-		width: 28px;
-		border-radius: 6px;
-		background-color: #38b97d;
-	}
-
-	.chart-labels {
-		display: flex;
-		flex-direction: row;
-		justify-content: space-between;
-		color: #9ca59f;
-		font-size: 8px;
 	}
 
 	.distribution-content {
@@ -406,7 +312,7 @@
 	.donut-label {
 		margin-top: 2px;
 		color: #8a948e;
-		font-size: 8px;
+		font-size: 10px;
 	}
 
 	.muscle-list {
@@ -419,7 +325,7 @@
 		align-items: center;
 		margin: 8px 0;
 		color: #76817b;
-		font-size: 10px;
+		font-size: 11px;
 	}
 
 	.muscle-dot {

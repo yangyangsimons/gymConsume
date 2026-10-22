@@ -1,0 +1,35 @@
+import { DEMO_MODE } from './gym-demo.uts'
+import { InsightPrefs, defaultPrefs, sanitizePrefs } from './gym-insights.uts'
+import { canUseLocal, cloudValue, queueCloud } from './gym-cloud.uts'
+
+// 动作表现的选择（动作 / 指标 / 时间范围）仅保存在本机 storage，不上传云端。
+// 演示模式使用独立的 key，不会影响真实偏好。
+const PREFS_KEY = 'gymConsume.insightPrefs.v1'
+const DEMO_PREFS_KEY = 'gymConsume.insightPrefs.demo.v1'
+
+function prefsKey() : string {
+	return DEMO_MODE ? DEMO_PREFS_KEY : PREFS_KEY
+}
+
+export function loadInsightPrefs() : InsightPrefs {
+	try {
+		const remote = DEMO_MODE ? null : cloudValue('prefs', 'insights')
+		if (remote != null) return sanitizePrefs(remote)
+		if (!DEMO_MODE && !canUseLocal('prefs', 'insights')) return defaultPrefs()
+		const raw = uni.getStorageSync(prefsKey())
+		if (raw == null || raw == '') return defaultPrefs()
+		return sanitizePrefs(typeof raw == 'string' ? JSON.parse(raw) : raw)
+	} catch (e) {
+		return defaultPrefs()
+	}
+}
+
+export function saveInsightPrefs(p : InsightPrefs) : boolean {
+	try {
+		uni.setStorageSync(prefsKey(), JSON.stringify(p))
+		if (!DEMO_MODE) queueCloud('prefs', 'insights', JSON.stringify(p))
+		return true
+	} catch (e) {
+		return false
+	}
+}

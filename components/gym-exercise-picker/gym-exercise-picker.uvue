@@ -1,0 +1,244 @@
+<template>
+	<view class="xp-backdrop sheet-mask" @click.stop="onClose" @touchmove.stop="noop">
+		<view class="xp-sheet" @click.stop="noop">
+			<view class="sheet-grabber"></view>
+			<view class="xp-header">
+				<text class="xp-title">选择动作</text>
+				<button class="xp-close" @click="onClose">
+					<gym-icon name="close-muted" :size="18"></gym-icon>
+				</button>
+			</view>
+			<view class="xp-search">
+				<gym-icon name="search-muted-light" :size="19"></gym-icon>
+				<input class="xp-input" placeholder="搜索动作名称、部位或拼音" :value="keyword" @input="onInput" />
+			</view>
+			<scroll-view class="xp-list" scroll-y="true">
+				<text class="xp-empty" v-if="rows.length === 0">没有找到动作</text>
+				<view v-for="row in rows" :key="row.key">
+					<text class="xp-group" v-if="row.header !== ''">{{ row.header }}</text>
+					<view class="xp-item" :class="{ active: row.id === selectedId }" v-if="row.id !== ''" @click="onPick(row.id)">
+						<view class="xp-item-copy">
+							<text class="xp-item-name">{{ row.name }}</text>
+							<text class="xp-item-sub">{{ row.sub }}</text>
+						</view>
+						<text class="xp-check" v-if="row.id === selectedId">当前</text>
+					</view>
+				</view>
+				<view class="xp-pad"></view>
+			</scroll-view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ExerciseOption, filterExerciseOptions, shortDate } from '@/services/gym-insights.uts'
+	import { lockTabBar, unlockTabBar } from '@/services/gym-modal.uts'
+
+	type PickerRow = {
+		key : string
+		// 非空时在该行上方显示分组标题
+		header : string
+		id : string
+		name : string
+		sub : string
+	}
+
+	type InputEventDetail = {
+		value : string
+	}
+	type InputEvent = {
+		detail : InputEventDetail
+	}
+
+	// options 已按“有记录在前”排序；打开期间不会变化，使用 props 以便跟随数据加载
+	const props = defineProps<{
+		options : ExerciseOption[]
+		selectedId : string
+	}>()
+
+	const emit = defineEmits(['select', 'close'])
+
+	const keyword = ref<string>('')
+
+	const rows = computed(() : PickerRow[] => {
+		const out : PickerRow[] = []
+		const list = filterExerciseOptions(props.options, keyword.value)
+		let phase = ''
+		for (let i = 0; i < list.length; i++) {
+			const o = list[i]
+			const next = o.count > 0 ? 'data' : 'empty'
+			let header = ''
+			if (next != phase) {
+				header = next == 'data' ? '有训练记录' : '暂无记录（可选择，图表为空）'
+				phase = next
+			}
+			const parts : string[] = []
+			if (o.category != '') parts.push(o.category)
+			if (o.count > 0) parts.push(o.count + ' 次训练 · 最近 ' + shortDate(o.lastDate))
+			else parts.push('暂无记录')
+			if (!o.inLibrary) parts.push('不在当前动作库')
+			out.push({ key: 'r' + i, header: header, id: o.id, name: o.name, sub: parts.join(' · ') } as PickerRow)
+		}
+		return out
+	})
+
+	function onInput(e : InputEvent) {
+		keyword.value = e.detail.value
+	}
+
+	function onPick(id : string) {
+		emit('select', id)
+	}
+
+	function onClose() {
+		emit('close')
+	}
+
+	function noop() {
+		// 阻止点击面板内容时冒泡到背景层，同时拦截背景滚动
+	}
+
+	onMounted(() => {
+		lockTabBar()
+	})
+
+	onUnmounted(() => {
+		unlockTabBar()
+	})
+</script>
+
+<style lang="scss">
+	@import "@/styles/sheet.scss";
+
+	.xp-backdrop {
+		@include sheet-backdrop(40);
+	}
+
+	.xp-sheet {
+		@include sheet-panel;
+		height: 78%;
+		padding-bottom: env(safe-area-inset-bottom);
+	}
+
+	.xp-header {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.xp-title {
+		color: #1f2a24;
+		font-size: 20px;
+		font-weight: 700;
+	}
+
+	.xp-close {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		margin: 0;
+		padding: 0;
+		border-width: 0;
+		border-radius: 18px;
+		background-color: #e9edea;
+	}
+
+	/* #ifdef MP-WEIXIN */
+	.xp-close::after {
+		border-width: 0;
+	}
+	/* #endif */
+
+	.xp-search {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		height: 45px;
+		margin-top: 16px;
+		padding: 0 13px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e3e8e5;
+		border-radius: 13px;
+		background-color: #ffffff;
+	}
+
+	.xp-input {
+		flex: 1;
+		margin-left: 9px;
+		color: #1f2a24;
+		font-size: 15px;
+	}
+
+	.xp-list {
+		flex: 1;
+		height: 0;
+		margin-top: 8px;
+	}
+
+	.xp-empty {
+		display: block;
+		padding: 28px 0;
+		color: #949d98;
+		font-size: 14px;
+		text-align: center;
+	}
+
+	.xp-group {
+		display: block;
+		margin: 12px 0 6px;
+		color: #7d8982;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.xp-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 8px;
+		padding: 12px 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 14px;
+		background-color: #ffffff;
+	}
+
+	.xp-item.active {
+		border-color: #1caa70;
+		background-color: #f1faf5;
+	}
+
+	.xp-item-copy {
+		flex: 1;
+		margin-right: 8px;
+	}
+
+	.xp-item-name {
+		display: block;
+		color: #1f2a24;
+		font-size: 15px;
+		font-weight: 600;
+	}
+
+	.xp-item-sub {
+		display: block;
+		margin-top: 3px;
+		color: #8d9691;
+		font-size: 12px;
+	}
+
+	.xp-check {
+		color: #159b65;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.xp-pad {
+		height: 24px;
+	}
+</style>

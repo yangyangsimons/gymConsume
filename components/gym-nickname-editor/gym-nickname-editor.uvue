@@ -1,0 +1,163 @@
+<template>
+	<view class="nn-backdrop sheet-mask" @click.stop="onClose" @touchmove.stop="noop">
+		<view class="nn-sheet" @click.stop="noop">
+			<view class="sheet-grabber"></view>
+			<view class="nn-header">
+				<text class="nn-title">修改昵称</text>
+				<button class="nn-close" @click="onClose">
+					<gym-icon name="close-muted" :size="18"></gym-icon>
+				</button>
+			</view>
+
+			<view class="nn-field">
+				<input class="nn-input" type="nickname" :value="draft" :maxlength="20" placeholder="输入昵称"
+					@input="onInput" />
+			</view>
+			<text class="nn-hint" :class="{ error: error != '' }">{{ error != '' ? error : '1–20 个字，与当前微信身份绑定' }}</text>
+
+			<view class="nn-footer">
+				<button class="nn-save" :class="{ 'is-disabled': !canSave }" :disabled="!canSave" @click="onSave">保存昵称</button>
+				<view class="nn-safe"></view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { saveNickname, validateNickname } from '@/services/gym-nickname.uts'
+	import { lockTabBar, unlockTabBar } from '@/services/gym-modal.uts'
+
+	const { nickname = '' } = defineProps<{ nickname ?: string }>()
+	const emit = defineEmits(['close', 'saved'])
+
+	const draft = ref<string>(nickname)
+	const error = computed(() : string => draft.value.trim() == '' ? '' : validateNickname(draft.value))
+	const canSave = computed(() : boolean => {
+		const name = draft.value.trim()
+		return name != '' && name != nickname && validateNickname(name) == ''
+	})
+
+	function onInput(e : UniInputEvent) {
+		draft.value = e.detail.value
+	}
+
+	function onSave() {
+		if (!canSave.value) return
+		if (saveNickname(draft.value)) emit('saved')
+	}
+
+	function onClose() {
+		emit('close')
+	}
+
+	function noop() {
+	}
+
+	onMounted(() => {
+		lockTabBar()
+	})
+
+	onUnmounted(() => {
+		unlockTabBar()
+	})
+</script>
+
+<style lang="scss">
+	@import "@/styles/sheet.scss";
+
+	.nn-backdrop {
+		@include sheet-backdrop(40);
+	}
+
+	.nn-sheet {
+		@include sheet-panel;
+	}
+
+	/* #ifdef MP-WEIXIN */
+	.nn-sheet button::after {
+		border-width: 0;
+	}
+	/* #endif */
+
+	.nn-sheet button {
+		line-height: 1.4;
+		font-family: inherit;
+	}
+
+	.nn-header {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.nn-title {
+		color: #1f2a24;
+		font-size: 20px;
+		font-weight: 700;
+	}
+
+	.nn-close {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		margin: 0;
+		padding: 0;
+		border-width: 0;
+		border-radius: 18px;
+		background-color: #e9edea;
+	}
+
+	.nn-field {
+		margin-top: 14px;
+		padding: 0 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 16px;
+		background-color: #ffffff;
+	}
+
+	.nn-input {
+		height: 48px;
+		color: #1f2a24;
+		font-size: 16px;
+	}
+
+	.nn-hint {
+		display: block;
+		margin-top: 8px;
+		color: #8b958f;
+		font-size: 12px;
+	}
+
+	.nn-hint.error {
+		color: #c55c5c;
+	}
+
+	.nn-footer {
+		padding: 14px 0 12px;
+	}
+
+	.nn-save {
+		width: 100%;
+		margin: 0;
+		padding: 15px;
+		border-width: 0;
+		border-radius: 14px;
+		color: #ffffff;
+		background-color: #1db676;
+		font-size: 17px;
+		font-weight: 700;
+	}
+
+	.nn-save.is-disabled {
+		opacity: 0.45;
+	}
+
+	.nn-safe {
+		height: env(safe-area-inset-bottom);
+	}
+</style>

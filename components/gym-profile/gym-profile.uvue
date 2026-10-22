@@ -6,13 +6,14 @@
 		</view>
 
 		<view class="profile-card">
-			<view class="profile-avatar">YC</view>
+			<view class="profile-avatar">{{ avatarText }}</view>
 			<view class="profile-info">
-				<text class="profile-name">Yuchen</text>
-				<text class="profile-sub">坚持训练的第 128 天</text>
+				<text class="profile-name">{{ nickname != '' ? nickname : '未连接' }}</text>
+				<text class="profile-sub">{{ nickname != '' ? '已绑定当前微信身份' : '尚未登录微信身份' }}</text>
 			</view>
-			<button class="profile-edit">
-				<gym-icon name="chevron-on-dark" :size="18"></gym-icon>
+			<button class="profile-edit" @click="onProfileAction">
+				<text v-if="nickname == ''" class="profile-edit-text">{{ connecting ? '连接中…' : '登录' }}</text>
+				<gym-icon v-else name="chevron-on-dark" :size="18"></gym-icon>
 			</button>
 		</view>
 
@@ -79,18 +80,72 @@
 			</button>
 		</view>
 
+		<button class="setting-row action" @click="retrySync">{{ syncLabel }}</button>
 		<button class="danger-button">清空全部数据</button>
 	</view>
 </template>
 
 <script setup lang="uts">
-	const dark = ref(false)
-	const unit = ref('kg')
+	import { loadSettings, saveSettings } from '@/services/gym-settings.uts'
+	import { refreshCloudData, retryAllCloud, syncSummary } from '@/services/gym-cloud.uts'
+	import { loadNickname } from '@/services/gym-nickname.uts'
+	const emit = defineEmits(['edit-nickname'])
+	const nickname = ref(loadNickname())
+	const connecting = ref(false)
+	const avatarText = computed(() : string => nickname.value == '' ? '?' : Array.from(nickname.value)[0])
+	async function onProfileAction() {
+		if (nickname.value != '') {
+			emit('edit-nickname', nickname.value)
+			return
+		}
+		if (connecting.value) return
+		connecting.value = true
+		try {
+			await refreshCloudData()
+		} catch (e) {
+			uni.showToast({ title: '登录失败，请稍后重试', icon: 'none' })
+		}
+		connecting.value = false
+		refreshSettings()
+	}
+	const initial = loadSettings()
+	const dark = ref(initial.dark)
+	const unit = ref(initial.unit)
+	const syncLabel = ref(syncSummary())
+	let restoring = false
+	watch([unit, dark], () => {
+		if (!restoring) saveSettings({ unit: unit.value, dark: dark.value })
+	})
+	function refreshSettings() {
+		restoring = true
+		const value = loadSettings()
+		unit.value = value.unit
+		dark.value = value.dark
+		syncLabel.value = syncSummary()
+		nickname.value = loadNickname()
+		nextTick(() => { restoring = false })
+	}
+	async function retrySync() {
+		try {
+			await retryAllCloud()
+		} catch (e) {
+			console.error('Settings retry failed', e)
+		}
+		syncLabel.value = syncSummary()
+	}
+	onMounted(() => {
+		uni.$on('workout-saved', refreshSettings)
+		uni.$on('cloud-sync-changed', refreshSettings)
+	})
+	onUnmounted(() => {
+		uni.$off('workout-saved', refreshSettings)
+		uni.$off('cloud-sync-changed', refreshSettings)
+	})
 </script>
 
 <style lang="scss">
 	.page-header {
-		padding: 34px 2px 22px;
+		padding: 4px 2px 22px;
 	}
 
 	.eyebrow {
@@ -109,7 +164,7 @@
 		display: flex;
 		flex-direction: row;
 		align-items: center;
-		padding: 19px;
+		padding: 16px;
 		border-radius: 21px;
 		background-color: #1d3a2e;
 	}
@@ -144,6 +199,11 @@
 	.profile-sub {
 		color: #bad2c6;
 		font-size: 10px;
+	}
+
+	.profile-edit-text {
+		color: #ffffff;
+		font-size: 13px;
 	}
 
 	.profile-edit {

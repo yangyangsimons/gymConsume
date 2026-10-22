@@ -1,12 +1,25 @@
 <template>
 	<view class="app-shell">
 		<scroll-view class="app-content" scroll-y="true">
-			<gym-profile></gym-profile>
+			<gym-profile @edit-nickname="openEditor"></gym-profile>
 		</scroll-view>
+		<gym-nickname-editor v-if="editing" :nickname="current" @close="editing = false" @saved="onSaved"></gym-nickname-editor>
 	</view>
 </template>
 
 <script setup lang="uts">
+	const editing = ref(false)
+	const current = ref('')
+
+	function openEditor(name : string) {
+		current.value = name
+		editing.value = true
+	}
+
+	function onSaved() {
+		editing.value = false
+		uni.$emit('workout-saved')
+	}
 </script>
 
 <style lang="scss">

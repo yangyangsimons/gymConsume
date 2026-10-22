@@ -1,0 +1,25 @@
+<template>
+	<view class="detail-page">
+		<gym-day-detail :date="date" :entry-key="entryKey"></gym-day-detail>
+	</view>
+</template>
+
+<script setup lang="uts">
+	const date = ref<string>('')
+	const entryKey = ref<string>('')
+
+	onLoad((options : OnLoadOptions) => {
+		// 小程序端 options 是普通对象，不是 Map
+		const opts = options as any
+		date.value = (opts['date'] ?? '') as string
+		entryKey.value = (opts['key'] ?? '') as string
+	})
+</script>
+
+<style lang="scss">
+	.detail-page {
+		width: 100%;
+		height: 100%;
+		background-color: #f6f8f6;
+	}
+</style>

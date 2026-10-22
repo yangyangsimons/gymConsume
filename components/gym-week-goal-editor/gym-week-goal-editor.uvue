@@ -1,0 +1,248 @@
+<template>
+	<view class="wg-backdrop sheet-mask" @click.stop="onClose" @touchmove.stop="noop">
+		<view class="wg-sheet" @click.stop="noop">
+			<view class="sheet-grabber"></view>
+			<view class="wg-header">
+				<text class="wg-title">每周训练目标</text>
+				<button class="wg-close" @click="onClose">
+					<gym-icon name="close-muted" :size="18"></gym-icon>
+				</button>
+			</view>
+
+			<view class="wg-body">
+				<view class="wg-field">
+					<text class="wg-label">每周训练天数</text>
+					<view class="wg-chips">
+						<button class="wg-chip" :class="{ active: selected === n }" v-for="n in options" :key="n"
+							@click="selected = n">{{ n }}</button>
+					</view>
+				</view>
+
+				<view class="wg-field">
+					<text class="wg-label">生效时间</text>
+					<view class="wg-chips">
+						<button class="wg-effect" :class="{ active: effect === 'now' }" @click="effect = 'now'">本周生效</button>
+						<button class="wg-effect" :class="{ active: effect === 'next' }" @click="effect = 'next'">下周生效</button>
+					</view>
+				</view>
+
+				<text class="wg-summary">{{ summary }}</text>
+			</view>
+
+			<view class="wg-footer">
+				<button class="wg-save" :class="{ 'is-disabled': unchanged }" :disabled="unchanged" @click="onSave">保存目标</button>
+				<text class="wg-note">先存本机，联网后同步</text>
+				<view class="wg-safe"></view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { EFFECT_NEXT, EFFECT_NOW, GOAL_MAX, GOAL_MIN, GoalSelection } from '@/services/weekly-goal.uts'
+	import { lockTabBar, unlockTabBar } from '@/services/gym-modal.uts'
+
+	// goal：本周正在使用的目标；pendingGoal：已设置、下周起生效的目标（0 表示没有）
+	// 弹层每次打开都会重新创建，这里的 props 只在创建时读取
+	const { goal, pendingGoal = 0 } = defineProps<{
+		goal : number
+		pendingGoal ?: number
+		nextWeekLabel ?: string
+	}>()
+
+	const emit = defineEmits(['save', 'close'])
+
+	const options : number[] = []
+	for (let n = GOAL_MIN; n <= GOAL_MAX; n++) options.push(n)
+
+	const selected = ref<number>(pendingGoal > 0 ? pendingGoal : goal)
+	const effect = ref<string>(pendingGoal > 0 ? EFFECT_NEXT : EFFECT_NOW)
+
+	// 与当前实际生效（或已设置的下周）目标相比没有变化时不可保存
+	const unchanged = computed(() : boolean => {
+		if (effect.value == EFFECT_NEXT) {
+			return selected.value == (pendingGoal > 0 ? pendingGoal : goal)
+		}
+		return selected.value == goal && pendingGoal == 0
+	})
+
+	const summary = computed(() : string => (effect.value == EFFECT_NEXT ? '下周起，' : '本周起，') + '每周训练 ' + selected.value + ' 天。')
+
+	function onSave() {
+		if (unchanged.value) return
+		emit('save', { goal: selected.value, effect: effect.value } as GoalSelection)
+	}
+
+	function onClose() {
+		emit('close')
+	}
+
+	function noop() {
+		// 阻止点击面板内容时冒泡到背景层，同时拦截背景滚动
+	}
+
+	onMounted(() => {
+		lockTabBar()
+	})
+
+	onUnmounted(() => {
+		unlockTabBar()
+	})
+</script>
+
+<style lang="scss">
+	@import "@/styles/sheet.scss";
+
+	.wg-backdrop {
+		@include sheet-backdrop(40);
+	}
+
+	.wg-sheet {
+		@include sheet-panel;
+	}
+
+	/* #ifdef MP-WEIXIN */
+	.wg-sheet button::after {
+		border-width: 0;
+	}
+	/* #endif */
+
+	.wg-sheet button {
+		line-height: 1.4;
+		font-family: inherit;
+	}
+
+	.wg-header {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.wg-title {
+		color: #1f2a24;
+		font-size: 20px;
+		font-weight: 700;
+	}
+
+	.wg-close {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		margin: 0;
+		padding: 0;
+		border-width: 0;
+		border-radius: 18px;
+		background-color: #e9edea;
+	}
+
+	.wg-body {
+		margin-top: 14px;
+	}
+
+	.wg-field {
+		margin-bottom: 12px;
+		padding: 12px 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 16px;
+		background-color: #ffffff;
+	}
+
+	.wg-label {
+		display: block;
+		margin-bottom: 10px;
+		color: #1f2a24;
+		font-size: 15px;
+		font-weight: 700;
+	}
+
+	.wg-chips {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.wg-chip {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		height: 42px;
+		margin: 0 6px 0 0;
+		padding: 0;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e4e9e6;
+		border-radius: 11px;
+		color: #717c76;
+		background-color: #ffffff;
+		font-size: 16px;
+		font-weight: 600;
+	}
+
+	.wg-chip.active,
+	.wg-effect.active {
+		border-color: #1caa70;
+		color: #ffffff;
+		background-color: #1caf73;
+	}
+
+	.wg-effect {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		height: 40px;
+		margin: 0 8px 0 0;
+		padding: 0 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e4e9e6;
+		border-radius: 11px;
+		color: #717c76;
+		background-color: #ffffff;
+		font-size: 14px;
+	}
+
+	.wg-summary {
+		display: block;
+		color: #25805d;
+		font-size: 14px;
+		font-weight: 600;
+	}
+
+	.wg-note {
+		display: block;
+		margin-top: 8px;
+		color: #a0a8a3;
+		font-size: 12px;
+		text-align: center;
+	}
+
+	.wg-footer {
+		padding: 12px 0;
+	}
+
+	.wg-save {
+		width: 100%;
+		margin: 0;
+		padding: 15px;
+		border-width: 0;
+		border-radius: 14px;
+		color: #ffffff;
+		background-color: #1db676;
+		font-size: 17px;
+		font-weight: 700;
+	}
+
+	.wg-save.is-disabled {
+		opacity: 0.45;
+	}
+
+	.wg-safe {
+		height: env(safe-area-inset-bottom);
+	}
+</style>

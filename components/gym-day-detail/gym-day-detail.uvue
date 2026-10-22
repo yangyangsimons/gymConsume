@@ -1,0 +1,317 @@
+<template>
+	<view class="dd-page">
+		<scroll-view class="dd-scroll" scroll-y="true">
+			<view class="dd-content">
+				<view class="dd-head">
+					<text class="dd-kicker">WORKOUT DETAIL</text>
+					<text class="dd-date">{{ dateLabel }}</text>
+				</view>
+
+				<text class="dd-empty" v-if="loading">加载中…</text>
+				<text class="dd-empty" v-else-if="cards.length === 0">没有找到这条训练记录</text>
+
+				<view class="dd-entry" v-for="card in cards" :key="card.key">
+					<view class="dd-entry-head">
+						<text class="dd-entry-title">{{ card.title }}</text>
+						<text class="dd-tag" :class="{ 'tag-active': card.active, 'tag-warn': card.warn }">{{ card.tag }}</text>
+					</view>
+					<view class="dd-stats">
+						<view class="dd-stat">
+							<text class="dd-stat-value">{{ card.workSets }}</text>
+							<text class="dd-stat-label">完成正式组</text>
+						</view>
+						<view class="dd-stat">
+							<text class="dd-stat-value">{{ card.volume }}</text>
+							<text class="dd-stat-label">容量 kg</text>
+						</view>
+						<view class="dd-stat">
+							<text class="dd-stat-value">{{ card.minutes }}</text>
+							<text class="dd-stat-label">{{ card.active ? '已用 分钟' : '用时 分钟' }}</text>
+						</view>
+					</view>
+					<text class="dd-note">{{ card.note }}</text>
+
+					<text class="dd-no-detail" v-if="card.exercises.length === 0">没有动作明细</text>
+					<view class="dd-ex" v-for="(ex, idx) in card.exercises" :key="idx">
+						<view class="dd-ex-top">
+							<text class="dd-ex-name">{{ ex.name }}</text>
+							<text class="dd-ex-sum">{{ ex.workSets }} 组 · {{ ex.volume }} kg</text>
+						</view>
+						<view class="dd-sets">
+							<text class="dd-set" :class="{ warm: set.warm }" v-for="(set, i) in ex.sets" :key="i">{{ set.text }}</text>
+						</view>
+					</view>
+				</view>
+				<view class="dd-pad"></view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { parseDate } from '@/services/gym-stats.uts'
+	import { DayEntry, STATUS_ACTIVE, entriesOnDate, entryNote, entryTag, entryTitle } from '@/services/gym-calendar.uts'
+	import { loadDayData } from '@/services/gym-days.uts'
+
+	type SetChip = {
+		text : string
+		warm : boolean
+	}
+	type ExerciseCard = {
+		name : string
+		workSets : number
+		volume : number
+		sets : SetChip[]
+	}
+	type EntryCard = {
+		key : string
+		title : string
+		tag : string
+		active : boolean
+		warn : boolean
+		note : string
+		workSets : number
+		volume : number
+		minutes : number
+		exercises : ExerciseCard[]
+	}
+
+	const props = defineProps<{
+		date ?: string
+		entryKey ?: string
+	}>()
+
+	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
+	const loading = ref<boolean>(true)
+	const entries = ref<DayEntry[]>([])
+
+	const dateLabel = computed(() : string => {
+		const date = props.date ?? ''
+		if (date == '') return ''
+		const d = parseDate(date)
+		return (d.getMonth() + 1) + '月' + d.getDate() + '日 · 星期' + weekNames[d.getDay()]
+	})
+
+	const cards = computed(() : EntryCard[] => {
+		const out : EntryCard[] = []
+		const entryKey = props.entryKey ?? ''
+		const list = entriesOnDate(entries.value, props.date ?? '')
+		for (let i = 0; i < list.length; i++) {
+			const e = list[i]
+			if (entryKey != '' && e.key != entryKey) continue
+			const tag = entryTag(e)
+			const exercises : ExerciseCard[] = []
+			for (let j = 0; j < e.exercises.length; j++) {
+				const ex = e.exercises[j]
+				const sets : SetChip[] = []
+				for (let k = 0; k < ex.sets.length; k++) {
+					sets.push({ text: ex.sets[k], warm: ex.sets[k].startsWith('热身') } as SetChip)
+				}
+				exercises.push({ name: ex.name, workSets: ex.workSets, volume: ex.volume, sets: sets } as ExerciseCard)
+			}
+			out.push({
+				key: e.key,
+				title: entryTitle(e),
+				tag: tag,
+				active: e.status == STATUS_ACTIVE,
+				warn: tag == '提交失败' || tag == '待提交' || tag == '仅热身',
+				note: entryNote(e),
+				workSets: e.workSets,
+				volume: e.volume,
+				minutes: e.durationMin,
+				exercises: exercises
+			} as EntryCard)
+		}
+		return out
+	})
+
+	onMounted(() => {
+		loadDayData().then((data) => {
+			entries.value = data.entries
+			loading.value = false
+		}).catch(() => {
+			loading.value = false
+		})
+	})
+</script>
+
+<style lang="scss">
+	.dd-page {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		height: 100%;
+		background-color: #f6f8f6;
+		font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+	}
+
+	.dd-scroll {
+		flex: 1;
+		height: 0;
+	}
+
+	.dd-content {
+		padding: 14px 14px 0;
+	}
+
+	.dd-head {
+		padding: 18px;
+		border-radius: 22px;
+		background-color: #1f4433;
+	}
+
+	.dd-kicker {
+		display: block;
+		margin-bottom: 6px;
+		color: #9fc4b1;
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 1px;
+	}
+
+	.dd-date {
+		display: block;
+		color: #ffffff;
+		font-size: 22px;
+		font-weight: 600;
+	}
+
+	.dd-empty {
+		display: block;
+		padding: 28px 0;
+		color: #949d98;
+		font-size: 14px;
+		text-align: center;
+	}
+
+	.dd-entry {
+		margin-top: 14px;
+		padding: 16px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e9edea;
+		border-radius: 18px;
+		background-color: #ffffff;
+	}
+
+	.dd-entry-head {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.dd-entry-title {
+		color: #1f2a24;
+		font-size: 17px;
+		font-weight: 700;
+	}
+
+	.dd-tag {
+		margin-left: 8px;
+		padding: 2px 8px;
+		border-radius: 7px;
+		color: #318463;
+		background-color: #edf8f3;
+		font-size: 11px;
+	}
+
+	.dd-tag.tag-active {
+		color: #a35f0f;
+		background-color: #fdf0dc;
+	}
+
+	.dd-tag.tag-warn {
+		color: #b5483f;
+		background-color: #fceceb;
+	}
+
+	.dd-stats {
+		display: flex;
+		flex-direction: row;
+		margin-top: 14px;
+	}
+
+	.dd-stat {
+		flex: 1;
+	}
+
+	.dd-stat-value {
+		display: block;
+		color: #159b65;
+		font-size: 22px;
+		font-weight: 700;
+	}
+
+	.dd-stat-label {
+		display: block;
+		margin-top: 4px;
+		color: #7d8982;
+		font-size: 11px;
+	}
+
+	.dd-note {
+		display: block;
+		margin-top: 12px;
+		color: #8d9691;
+		font-size: 12px;
+		line-height: 1.6;
+	}
+
+	.dd-no-detail {
+		display: block;
+		margin-top: 14px;
+		color: #a0aaa4;
+		font-size: 12px;
+	}
+
+	.dd-ex {
+		margin-top: 14px;
+		padding-top: 14px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #eef1ef;
+	}
+
+	.dd-ex-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.dd-ex-name {
+		color: #1f2a24;
+		font-size: 15px;
+		font-weight: 600;
+	}
+
+	.dd-ex-sum {
+		color: #7d8982;
+		font-size: 12px;
+	}
+
+	.dd-sets {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-top: 8px;
+	}
+
+	.dd-set {
+		margin: 0 8px 8px 0;
+		padding: 4px 10px;
+		border-radius: 8px;
+		color: #3f4c45;
+		background-color: #f0f5f2;
+		font-size: 12px;
+	}
+
+	.dd-set.warm {
+		color: #8d9691;
+		background-color: #f5f6f5;
+	}
+
+	.dd-pad {
+		height: 32px;
+	}
+</style>

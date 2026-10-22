@@ -1,11 +1,15 @@
 <template>
 	<view class="ov-page">
 		<scroll-view class="ov-scroll" scroll-y="true">
+			<view class="ov-missing" v-if="session == null">
+				<text class="ov-missing-title">没有找到这场训练</text>
+				<text class="ov-missing-text">它可能已经结束或被清除。这里不会自动创建新的训练，请回到首页开始今天的训练。</text>
+			</view>
 			<view class="ov-content" v-if="session != null">
 				<view class="ov-head">
 					<view class="ov-head-top">
 						<view class="ov-head-copy">
-							<text class="ov-kicker">{{ isFinished ? 'WORKOUT SUMMARY' : 'TODAY WORKOUT' }}</text>
+							<text class="ov-kicker">{{ kicker }}</text>
 							<text class="ov-date">{{ dateLabel }}</text>
 						</view>
 						<text class="ov-tag" :class="{ done: isFinished }">{{ isFinished ? '已结束' : '进行中' }}</text>
@@ -36,7 +40,7 @@
 				</view>
 
 				<view class="ov-list">
-					<text class="ov-empty" v-if="cards.length === 0">还没有添加动作，点击下方“添加动作”开始。</text>
+					<text class="ov-empty" v-if="cards.length === 0">还没有添加动作</text>
 					<view class="ov-card" v-for="card in cards" :key="card.id">
 						<view class="ov-card-top">
 							<view class="ov-card-copy">
@@ -58,7 +62,7 @@
 					</view>
 				</view>
 
-				<button class="ov-add" v-if="!isFinished" @click="onAdd">
+				<button class="ov-add" v-if="!isFinished && cards.length > 0" @click="onAdd">
 					<gym-icon name="plus-brand" :size="18"></gym-icon>
 					<text>添加动作</text>
 				</button>
@@ -67,11 +71,17 @@
 		</scroll-view>
 
 		<view class="ov-footer">
-			<view class="ov-footer-row" v-if="isFinished">
+			<button class="ov-secondary" v-if="!isFinished && session != null && session.cloudStatus === 'failed'"
+				:disabled="syncing" @click="onRetry">{{ syncing ? '同步中…' : '重试同步草稿' }}</button>
+			<view class="ov-footer-row" v-if="session == null">
+				<button class="ov-primary" @click="goHome">返回首页</button>
+			</view>
+			<view class="ov-footer-row" v-else-if="isFinished">
 				<button class="ov-secondary" v-if="session != null && session.cloudStatus === 'failed'" :disabled="syncing"
 					@click="onRetry">{{ syncing ? '提交中…' : '重试提交' }}</button>
 				<button class="ov-primary" @click="goHome">返回首页</button>
 			</view>
+			<button class="ov-primary" v-else-if="cards.length === 0" @click="onAdd">＋ 添加动作</button>
 			<button class="ov-primary" v-else :disabled="busy" @click="onFinish">结束训练</button>
 			<view class="ov-safe"></view>
 		</view>
@@ -81,10 +91,10 @@
 </template>
 
 <script setup lang="uts">
-	import { parseDate } from '@/services/gym-stats.uts'
+	import { formatDate, parseDate } from '@/services/gym-stats.uts'
 	import {
-		SessionTotals, WorkoutSession, durationMinutes, exerciseProgress, exerciseVolume, finishSession, formatTarget,
-		loadSession, saveSession, sessionTotals, startSession
+		SessionTotals, WorkoutSession, activateSession, durationMinutes, exerciseProgress, exerciseVolume, finishSession, formatTarget,
+		loadSession, saveSession, sessionTotals
 	} from '@/services/workout-session.uts'
 	import { syncSessionToCloud } from '@/services/workout-adapter.uts'
 	import { confirmDialog } from '@/services/gym-dialog.uts'
@@ -100,6 +110,12 @@
 		detail : string
 	}
 
+	// sessionId 由路由参数传入；本页面只打开已有训练，从不创建训练。
+	// 没有 ID 时只显示当前会话（例如刚结束的训练摘要）。
+	const { sessionId = '' } = defineProps<{
+		sessionId ?: string
+	}>()
+
 	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
 
 	const session = ref<WorkoutSession | null>(null)
@@ -111,15 +127,25 @@
 	function reload() {
 		session.value = loadSession()
 	}
+	onMounted(() => uni.$on('cloud-sync-changed', reload))
+	onUnmounted(() => uni.$off('cloud-sync-changed', reload))
 
+	// 指定 ID 时把该训练设为当前会话（ID、开始时间、日期保持不变）；找不到则显示空状态
+	if (sessionId != '') activateSession(sessionId)
 	reload()
-	if (session.value == null) session.value = startSession()
+	if (session.value != null && sessionId != '' && session.value.id != sessionId) session.value = null
 	// 上次离开时仍有未保存的动作编辑，自动恢复
 	if (session.value != null && session.value.status == 'active' && session.value.editing != null) {
 		sheetOpen.value = true
 	}
 
 	const isFinished = computed(() : boolean => session.value != null && session.value.status == 'finished')
+
+	const kicker = computed(() : string => {
+		if (isFinished.value) return 'WORKOUT SUMMARY'
+		const s = session.value
+		return s != null && s.date == formatDate(new Date()) ? 'TODAY WORKOUT' : 'IN PROGRESS'
+	})
 
 	const dateLabel = computed(() : string => {
 		if (session.value == null) return ''
@@ -162,8 +188,13 @@
 	const noteText = computed(() : string => {
 		const s = session.value
 		if (s == null) return ''
-		if (s.status == 'active') return '已自动保存到本机。结束训练后，才会把已完成的正式组提交到云端。'
-		if (s.cloudStatus == 'synced') return '已提交到云端：仅已完成正式组的重量与次数。热身组、RIR 和目标仅保存在本机。'
+		if (s.status == 'active') {
+			if (s.cloudStatus == 'synced') return '草稿已同步到云端'
+			if (s.cloudStatus == 'failed') return '草稿保留在本机，云端同步失败'
+			if (s.date != formatDate(new Date())) return '草稿已保存到本机。这场训练开始于' + dateLabel.value + '，日期不会改为今天。'
+			return '草稿已保存到本机'
+		}
+		if (s.cloudStatus == 'synced') return s.durationSent ? '旧版记录已提交；完整信息保留在本机' : '训练记录已同步到云端'
 		if (s.cloudStatus == 'failed') return '云端提交失败，训练记录仍保存在本机，可重试提交。'
 		if (s.cloudStatus == 'skipped') return '仅完成了热身组，不计入正式训练，也未提交到云端；记录已保存到本机。'
 		return '训练记录已保存到本机。'
@@ -209,8 +240,8 @@
 		try {
 			await syncSessionToCloud(s)
 		} catch (e) {
-			s.cloudStatus = 'failed'
-			saveSession(s)
+			console.error('Training sync failed; local record retained', e)
+			uni.showToast({ title: '同步失败，本机数据已保留', icon: 'none' })
 		}
 		syncing.value = false
 		reload()
@@ -223,7 +254,11 @@
 		if (t.workDone + t.warmupDone == 0) {
 			const ok = await confirmDialog('没有完成的组', '还没有完成任何一组，结束后不会产生训练记录，已填写的内容也会被清除。', '结束', '返回继续')
 			if (!ok) return
-			finishSession(s)
+			if (finishSession(s) == 'stale') {
+				uni.showToast({ title: '这场训练状态已变化，请重新进入', icon: 'none' })
+				reload()
+				return
+			}
 			uni.switchTab({
 				url: '/pages/home/home',
 				success: () => {
@@ -237,7 +272,12 @@
 		const ok = await confirmDialog('结束本次训练？', content, '结束训练', '返回继续')
 		if (!ok) return
 		busy.value = true
-		finishSession(s)
+		if (finishSession(s) == 'stale') {
+			uni.showToast({ title: '这场训练状态已变化，请重新进入', icon: 'none' })
+			reload()
+			busy.value = false
+			return
+		}
 		reload()
 		if (s.cloudStatus == 'pending') await runSync(s)
 		busy.value = false
@@ -267,7 +307,7 @@
 	}
 
 	.ov-content {
-		padding: 16px 20px 0;
+		padding: 14px 14px 0;
 	}
 
 	.ov-head {
@@ -491,7 +531,7 @@
 	}
 
 	.ov-footer {
-		padding: 10px 20px 12px;
+		padding: 10px 14px 10px;
 		border-top-width: 1px;
 		border-top-style: solid;
 		border-top-color: #e9edea;
@@ -504,21 +544,30 @@
 	}
 
 	.ov-primary {
-		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		height: 48px;
 		margin: 0;
-		padding: 15px;
+		padding: 0;
 		border-width: 0;
 		border-radius: 14px;
 		color: #ffffff;
 		background-color: #1db676;
 		font-size: 17px;
 		font-weight: 700;
+		line-height: 1.4;
 	}
 
 	.ov-secondary {
+		display: flex;
 		flex: 1;
+		align-items: center;
+		justify-content: center;
+		height: 48px;
 		margin: 0 10px 0 0;
-		padding: 14px;
+		padding: 0;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #1caf73;
@@ -526,6 +575,38 @@
 		color: #25805d;
 		background-color: transparent;
 		font-size: 16px;
+		line-height: 1.4;
+	}
+
+	.ov-footer-row .ov-primary {
+		flex: 1;
+		width: auto;
+	}
+
+	.ov-missing {
+		margin: 16px 14px 0;
+		padding: 28px 16px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #d9dfdb;
+		border-radius: 18px;
+	}
+
+	.ov-missing-title {
+		display: block;
+		color: #4a5650;
+		font-size: 15px;
+		font-weight: 600;
+		text-align: center;
+	}
+
+	.ov-missing-text {
+		display: block;
+		margin-top: 8px;
+		color: #8d9691;
+		font-size: 13px;
+		line-height: 1.6;
+		text-align: center;
 	}
 
 	.ov-safe {

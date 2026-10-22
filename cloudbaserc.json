@@ -1,0 +1,12 @@
+{
+  "envId": "cloud1-d0gjxp9f1819c8c1e",
+  "functionRoot": "cloudfunctions",
+  "functions": [{
+    "name": "gymData",
+    "runtime": "Nodejs18.15",
+    "handler": "index.main",
+    "timeout": 20,
+    "memorySize": 256,
+    "installDependency": true
+  }]
+}

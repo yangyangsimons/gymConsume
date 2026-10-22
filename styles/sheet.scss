@@ -1,0 +1,52 @@
+// 底部弹层公共样式（小程序组件样式相互隔离，各弹层组件各自引入）。
+//
+// 弹层必须渲染在页面的 scroll-view 之外：iOS 真机上 scroll-view 内部的 position: fixed 会被滚动容器（及其 padding）限制，
+// 导致遮罩和面板只有内容区宽度。因此首页 / 数据页的弹层由页面容器组件（gym-dashboard / gym-analytics）放在 scroll-view 的同级。
+
+// 视口级遮罩容器：铺满整个窗口，面板贴底
+@mixin sheet-backdrop($z: 40) {
+	position: fixed;
+	z-index: $z;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+}
+
+// 面板外壳：全宽、不透明浅色背景、顶部圆角 24px、内容左右留白 16px；圆角在外壳上，overflow 保证子元素背景不盖住圆角
+@mixin sheet-panel {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	padding: 10px 16px 0;
+	border-radius: 24px 24px 0 0;
+	color: #1f2a24;
+	background-color: #f8faf8;
+	overflow: hidden;
+	font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+// 顶部短条：逻辑尺寸 36 × 4，完全圆角，低对比灰色，水平居中。
+.sheet-grabber {
+	flex-shrink: 0;
+	align-self: center;
+	width: 36px;
+	height: 4px;
+	margin: 2px 0 14px;
+	border-radius: 2px;
+	background-color: #d9dfdb;
+}
+
+// 遮罩：单层弹层使用 sheet-mask；叠在另一个弹层之上的二级弹层使用 sheet-mask-light，避免背景被连续压黑
+.sheet-mask {
+	background-color: #13251c8c;
+}
+
+.sheet-mask-light {
+background-color: #13251c1f;
+}

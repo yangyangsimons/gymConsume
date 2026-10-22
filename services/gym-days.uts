@@ -1,0 +1,37 @@
+import { ExerciseLog, SetLog, Workout } from './gym-stats.uts'
+import { loadWorkouts } from './gym-api.uts'
+import { DayEntry, ExerciseSummary, SetRecord, buildDayEntries } from './gym-calendar.uts'
+import { loadLocalSessions } from './workout-session.uts'
+
+export type DayData = {
+	entries : DayEntry[]
+	// false 时仅有本机数据（云端加载失败）
+	cloudLoaded : boolean
+}
+
+// 云端记录 + 本机训练（进行中 / 未同步），详情页使用；首页自行持有两路数据以便分别刷新
+export async function loadDayData() : Promise<DayData> {
+	let workouts : Workout[] = []
+	let ok = true
+	try {
+		workouts = await loadWorkouts()
+	} catch (e) {
+		ok = false
+		console.error('Legacy cloud records could not be loaded', e)
+	}
+	return { entries: buildDayEntries(workouts, loadLocalSessions(), ok), cloudLoaded: ok } as DayData
+}
+
+// The previous-set hint uses the same reconciled sessions as calendar/statistics.
+export async function loadPreviousWorkouts() : Promise<Workout[]> {
+	const data = await loadDayData()
+	const entries = data.entries.filter((e : DayEntry) : boolean => e.counted)
+	entries.sort((a : DayEntry, b : DayEntry) : number => a.date == b.date ? b.at - a.at : (a.date < b.date ? 1 : -1))
+	return entries.map((e : DayEntry) : Workout => ({
+		_id: e.key, date: e.date, durationMin: e.durationMin, totalSets: e.workSets, totalVolume: e.volume,
+		exercises: e.exercises.map((ex : ExerciseSummary) : ExerciseLog => ({
+			exerciseId: ex.exerciseId, name: ex.name, category: ex.category,
+			sets: ex.records.map((s : SetRecord) : SetLog => ({ weight: s.weight, reps: s.reps, done: true }))
+		}))
+	}))
+}

@@ -1,0 +1,672 @@
+<template>
+	<view class="analytics-card">
+		<view class="section-heading">
+			<view>
+				<text class="section-kicker">PERFORMANCE</text>
+				<view class="pf-title-row">
+					<text class="section-title">动作表现</text>
+					<text class="demo-tag pf-demo" v-if="demo">演示数据</text>
+				</view>
+			</view>
+			<picker mode="selector" :range="rangeLabels" :value="rangeIndex" @change="onRangeChange">
+				<view class="pf-range">{{ rangeLabel }} ▾</view>
+			</picker>
+		</view>
+
+		<view class="pf-select" @click="openPicker">
+			<text class="pf-select-name">{{ exerciseName }}</text>
+			<text class="pf-select-arrow">▾</text>
+		</view>
+
+		<view class="pf-metrics">
+			<text class="pf-chip" :class="{ active: prefs.metric === 'weight' }" @click="setMetric('weight')">最高工作重量</text>
+			<text class="pf-chip" :class="{ active: prefs.metric === 'volume' }" @click="setMetric('volume')">训练容量</text>
+			<text class="pf-info" @click="showInfo">ⓘ</text>
+		</view>
+
+		<text class="pf-empty" v-if="options.length === 0">还没有可选择的动作。</text>
+		<text class="pf-empty" v-else-if="!trend.supported">该动作以自重或核心发力为主，暂不提供重量类趋势。</text>
+		<text class="pf-empty" v-else-if="trend.total === 0">该动作还没有已结束训练的记录。</text>
+		<text class="pf-empty" v-else-if="trend.points.length === 0">{{ noRangeText }}</text>
+
+		<view v-if="chartVisible">
+			<view class="pf-head">
+				<text class="pf-head-value">{{ headValue }}</text>
+				<text class="pf-head-unit">{{ unit }}</text>
+			</view>
+			<text class="pf-head-sub">{{ headSub }}</text>
+			<text class="pf-range-sum">{{ rangeSummary }}</text>
+
+			<view class="pf-chart">
+				<view class="pf-axis">
+					<text class="pf-axis-label">{{ axisTop }}</text>
+					<text class="pf-axis-label">{{ axisMid }}</text>
+					<text class="pf-axis-label">0</text>
+				</view>
+				<scroll-view class="pf-scroll" scroll-x="true" :key="chartKey" :scroll-into-view="scrollTarget">
+					<view class="pf-track" :style="trackStyle">
+						<view class="pf-grid">
+							<view class="pf-grid-line top"></view>
+							<view class="pf-grid-line mid"></view>
+							<view class="pf-grid-line bottom"></view>
+						</view>
+						<view class="pf-col" :class="{ fixed: scrollable }" :id="bar.id" v-for="bar in bars" :key="bar.key"
+							@click="onPick(bar.key)">
+							<view class="pf-plot">
+								<view class="pf-bar" :class="{ selected: bar.selected }" :style="{ height: bar.height + 'px' }"></view>
+							</view>
+							<text class="pf-col-date">{{ bar.label }}</text>
+							<text class="pf-col-sub">{{ bar.sub }}</text>
+						</view>
+					</view>
+				</scroll-view>
+			</view>
+
+			<view class="pf-detail" v-if="selected != null">
+				<view class="pf-detail-top">
+					<text class="pf-detail-date">{{ selectedTitle }}</text>
+					<text class="pf-detail-close" @click="closeDetail">收起</text>
+				</view>
+				<view class="pf-detail-main">
+					<text class="pf-detail-value">{{ selectedValue }}</text>
+					<text class="pf-detail-unit">{{ unit }} · {{ metricTitle }}</text>
+				</view>
+				<text class="pf-detail-line">{{ selectedLine }}</text>
+				<view class="pf-sets">
+					<text class="pf-set" :class="{ top: s.top }" v-for="(s, i) in selectedSets" :key="i">{{ s.text }}</text>
+				</view>
+				<text class="pf-detail-note" v-if="selectedNote !== ''">{{ selectedNote }}</text>
+			</view>
+		</view>
+
+		<text class="pf-last" v-if="lastText !== ''">最近一次 · {{ lastText }}</text>
+		<text class="pf-foot" v-if="occs.unlinked > 0">另有 {{ occs.unlinked }} 条缺少动作 ID 的旧记录未纳入。</text>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { DayEntry } from '@/services/gym-calendar.uts'
+	import { Exercise } from '@/services/gym-stats.uts'
+	import {
+		ExerciseOption, InsightPrefs, METRIC_VOLUME, METRIC_WEIGHT, OccurrenceSet, RANGE_OPTIONS, RangeOption, TrendPoint, TrendResult,
+		WEIGHT_UNIT, buildExerciseOptions, buildTrend, clockLabel, collectOccurrences, defaultPrefs, metricDesc, metricLabel, resolveExerciseId,
+		shortDate, slashDate, volumeFormula
+	} from '@/services/gym-insights.uts'
+	import { loadInsightPrefs, saveInsightPrefs } from '@/services/gym-insights-data.uts'
+	import { infoDialog } from '@/services/gym-dialog.uts'
+
+	type ChartBar = {
+		key : string
+		id : string
+		label : string
+		sub : string
+		height : number
+		selected : boolean
+	}
+	type SetChip = {
+		text : string
+		top : boolean
+	}
+	type PickerChangeEventDetail = {
+		value : string
+	}
+	type PickerChangeEvent = {
+		detail : PickerChangeEventDetail
+	}
+
+	const props = defineProps<{
+		entries : DayEntry[]
+		library : Exercise[]
+		today : string
+		demo ?: boolean
+	}>()
+
+	const emit = defineEmits(['open-picker'])
+
+	const PLOT_HEIGHT = 104
+	const COL_WIDTH = 38
+	const SCROLL_FROM = 8
+	const ranges : RangeOption[] = RANGE_OPTIONS
+	const rangeLabels : string[] = ranges.map((r : RangeOption) : string => r.label)
+	const unit = WEIGHT_UNIT
+
+	const prefs = ref<InsightPrefs>(defaultPrefs())
+	// 只有主动点击数据点才展开详情
+	const selectedKey = ref<string>('')
+
+	const occs = computed(() : OccurrenceSet => collectOccurrences(props.entries))
+	const options = computed(() : ExerciseOption[] => buildExerciseOptions(props.library, occs.value.items))
+	const exerciseId = computed(() : string => resolveExerciseId(options.value, prefs.value.exerciseId))
+	const current = computed(() : ExerciseOption | null => {
+		for (let i = 0; i < options.value.length; i++) {
+			if (options.value[i].id == exerciseId.value) return options.value[i]
+		}
+		return null
+	})
+	const exerciseName = computed(() : string => current.value == null ? '选择动作' : current.value.name)
+	const trend = computed(() : TrendResult => buildTrend(occs.value.items, exerciseId.value, current.value == null ? '' : current.value.category, prefs.value.metric, props.today, prefs.value.rangeDays))
+
+	const metricTitle = computed(() : string => metricLabel(prefs.value.metric))
+	const rangeIndex = computed(() : number => {
+		for (let i = 0; i < ranges.length; i++) {
+			if (ranges[i].days == prefs.value.rangeDays) return i
+		}
+		return 1
+	})
+	const rangeLabel = computed(() : string => ranges[rangeIndex.value].label)
+
+	const chartVisible = computed(() : boolean => trend.value.supported && trend.value.points.length > 0)
+
+	const rangeSummary = computed(() : string => {
+		let text = rangeLabel.value + ' · ' + trend.value.points.length + ' 次训练'
+		if (trend.value.noValue > 0) text += ' · ' + trend.value.noValue + ' 次缺少重量'
+		return text
+	})
+	const noRangeText = computed(() : string => {
+		const last = trend.value.last
+		let text = rangeLabel.value + '内没有该动作的' + (trend.value.noValue > 0 ? '可计算记录' : '训练记录')
+		if (last != null) text += '，最近一次在 ' + shortDate(last.date)
+		return text + '。'
+	})
+
+	function topText(p : TrendPoint) : string {
+		const tops : string[] = []
+		for (let i = 0; i < p.topSets.length; i++) tops.push(p.topSets[i].weight + ' × ' + p.topSets[i].reps)
+		return tops.join('、')
+	}
+
+	// 当前范围内最近一次训练的主要数值
+	const latest = computed(() : TrendPoint | null => {
+		const pts = trend.value.points
+		return pts.length == 0 ? null : pts[pts.length - 1]
+	})
+	const headValue = computed(() : string => latest.value == null ? '' : '' + latest.value.value)
+	const headSub = computed(() : string => {
+		const p = latest.value
+		if (p == null) return ''
+		const detail = prefs.value.metric == METRIC_VOLUME ? p.usedSets + ' 组' : topText(p)
+		return shortDate(p.date) + ' · ' + detail
+	})
+
+	const selected = computed(() : TrendPoint | null => {
+		if (selectedKey.value == '') return null
+		const pts = trend.value.points
+		for (let i = 0; i < pts.length; i++) {
+			if (pts[i].key == selectedKey.value) return pts[i]
+		}
+		return null
+	})
+
+	const scrollable = computed(() : boolean => trend.value.points.length > SCROLL_FROM)
+	const trackStyle = computed(() : string => scrollable.value ? 'width:' + trend.value.points.length * COL_WIDTH + 'px' : 'width:100%')
+	const scrollTarget = computed(() : string => scrollable.value ? 'pf-col-' + (trend.value.points.length - 1) : '')
+	// 切换动作 / 指标 / 范围时重建滚动容器，使其回到最新一次训练
+	const chartKey = computed(() : string => exerciseId.value + '|' + prefs.value.metric + '|' + prefs.value.rangeDays + '|' + trend.value.points.length)
+
+	const bars = computed(() : ChartBar[] => {
+		const out : ChartBar[] = []
+		const pts = trend.value.points
+		for (let i = 0; i < pts.length; i++) {
+			const p = pts[i]
+			out.push({
+				key: p.key,
+				id: 'pf-col-' + i,
+				label: slashDate(p.date),
+				sub: p.countOnDate > 1 ? '第' + p.seq + '次' : '',
+				height: Math.max(3, Math.round(p.value / trend.value.axisMax * PLOT_HEIGHT)),
+				selected: p.key == selectedKey.value
+			} as ChartBar)
+		}
+		return out
+	})
+
+	const axisTop = computed(() : string => '' + trend.value.ticks[2])
+	const axisMid = computed(() : string => '' + trend.value.ticks[1])
+
+	const selectedTitle = computed(() : string => {
+		const p = selected.value
+		if (p == null) return ''
+		let text = shortDate(p.date)
+		if (p.countOnDate > 1) text += ' · 当天第 ' + p.seq + ' 次'
+		const clock = clockLabel(p.at)
+		if (clock != '') text += ' · ' + clock
+		return text
+	})
+	const selectedValue = computed(() : string => selected.value == null ? '' : '' + selected.value.value)
+	const selectedLine = computed(() : string => {
+		const p = selected.value
+		if (p == null) return ''
+		if (prefs.value.metric == METRIC_VOLUME) return volumeFormula(p)
+		return '对应记录：' + topText(p) + ' ' + unit
+	})
+	const selectedSets = computed(() : SetChip[] => {
+		const out : SetChip[] = []
+		const p = selected.value
+		if (p == null) return out
+		const weightMetric = prefs.value.metric == METRIC_WEIGHT
+		for (let i = 0; i < p.sets.length; i++) {
+			const s = p.sets[i]
+			const valid = s.weight > 0 && s.reps > 0
+			out.push({
+				text: valid ? s.weight + ' × ' + s.reps : '缺少数据',
+				top: weightMetric && valid && s.weight == p.maxWeight
+			} as SetChip)
+		}
+		return out
+	})
+	const selectedNote = computed(() : string => {
+		const p = selected.value
+		if (p == null || p.skippedSets == 0) return ''
+		return p.skippedSets + ' 组缺少有效重量或次数，未计入。'
+	})
+
+	// 仅在没有图表可画的情况下（不支持重量指标）作为补充展示最近一次记录
+	const lastText = computed(() : string => {
+		const p = trend.value.last
+		if (p == null || trend.value.supported) return ''
+		const reps : string[] = []
+		for (let i = 0; i < p.sets.length; i++) reps.push('' + p.sets[i].reps)
+		return shortDate(p.date) + ' · ' + p.sets.length + ' 组 · 每组次数 ' + reps.join(' / ')
+	})
+
+	function persist() {
+		saveInsightPrefs(prefs.value)
+	}
+
+	function setMetric(m : string) {
+		prefs.value.metric = m
+		selectedKey.value = ''
+		persist()
+	}
+
+	function onRangeChange(e : PickerChangeEvent) {
+		const i = parseInt(e.detail.value)
+		if (i < 0 || i >= ranges.length) return
+		prefs.value.rangeDays = ranges[i].days
+		selectedKey.value = ''
+		persist()
+	}
+
+	function showInfo() {
+		infoDialog(metricTitle.value, metricDesc(prefs.value.metric) + '\n\n每根柱子是该动作的一次训练，按时间排列；没有训练的日子不补 0，纵轴从 0 开始。')
+	}
+
+	// 选择弹层由页面容器在 scroll-view 之外渲染：这里只发出请求，并通过事件接收选择结果
+	function openPicker() {
+		emit('open-picker', { options: options.value, selectedId: exerciseId.value })
+	}
+
+	function onSelectExercise(id : string) {
+		prefs.value.exerciseId = id
+		selectedKey.value = ''
+		persist()
+	}
+
+	function onPick(key : string) {
+		selectedKey.value = selectedKey.value == key ? '' : key
+	}
+
+	function closeDetail() {
+		selectedKey.value = ''
+	}
+
+	function refreshPrefs() {
+		prefs.value = loadInsightPrefs()
+	}
+
+	onMounted(() => {
+		refreshPrefs()
+		uni.$on('exercise-performance-pick', onSelectExercise)
+		uni.$on('workout-saved', refreshPrefs)
+	})
+
+	onUnmounted(() => {
+		uni.$off('exercise-performance-pick', onSelectExercise)
+		uni.$off('workout-saved', refreshPrefs)
+	})
+</script>
+
+<style lang="scss">
+	@import "@/styles/analytics-card.scss";
+
+	.pf-title-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.pf-demo {
+		margin-left: 8px;
+	}
+
+	.pf-range {
+		padding: 7px 10px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e2e7e4;
+		border-radius: 10px;
+		color: #526159;
+		background-color: #ffffff;
+		font-size: 13px;
+	}
+
+	.pf-select {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		height: 44px;
+		padding: 0 14px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e3e8e5;
+		border-radius: 13px;
+		background-color: #fbfcfb;
+	}
+
+	.pf-select-name {
+		flex: 1;
+		min-width: 0;
+		color: #1f2a24;
+		font-size: 16px;
+		font-weight: 600;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		overflow: hidden;
+	}
+
+	.pf-select-arrow {
+		margin-left: 8px;
+		color: #7d8982;
+		font-size: 14px;
+	}
+
+	.pf-metrics {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 10px;
+	}
+
+	.pf-chip {
+		flex: 1;
+		margin-right: 8px;
+		padding: 7px 0;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e4e9e6;
+		border-radius: 10px;
+		color: #717c76;
+		background-color: #ffffff;
+		font-size: 13px;
+		text-align: center;
+	}
+
+	.pf-chip.active {
+		border-color: #1caa70;
+		color: #ffffff;
+		background-color: #1caf73;
+		font-weight: 600;
+	}
+
+	.pf-info {
+		width: 36px;
+		height: 36px;
+		color: #8d9691;
+		font-size: 18px;
+		line-height: 36px;
+		text-align: center;
+	}
+
+	.pf-empty {
+		display: block;
+		margin-top: 14px;
+		padding: 20px 14px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #d9dfdb;
+		border-radius: 16px;
+		color: #8d9691;
+		font-size: 13px;
+		line-height: 1.6;
+		text-align: center;
+	}
+
+	.pf-head {
+		display: flex;
+		flex-direction: row;
+		align-items: baseline;
+		margin-top: 16px;
+	}
+
+	.pf-head-value {
+		margin-right: 6px;
+		color: #1f2a24;
+		font-size: 28px;
+		font-weight: 700;
+	}
+
+	.pf-head-unit {
+		color: #6e7973;
+		font-size: 13px;
+	}
+
+	.pf-head-sub {
+		display: block;
+		margin-top: 2px;
+		color: #6e7973;
+		font-size: 13px;
+	}
+
+	.pf-range-sum {
+		display: block;
+		margin-top: 4px;
+		color: #a0a8a3;
+		font-size: 12px;
+	}
+
+	.pf-chart {
+		display: flex;
+		flex-direction: row;
+		margin-top: 12px;
+	}
+
+	.pf-axis {
+		display: flex;
+		flex-direction: column;
+		justify-content: space-between;
+		width: 34px;
+		height: 104px;
+		margin-right: 6px;
+	}
+
+	.pf-axis-label {
+		color: #a0a8a3;
+		font-size: 10px;
+		line-height: 12px;
+		text-align: right;
+	}
+
+	.pf-scroll {
+		flex: 1;
+		width: 0;
+	}
+
+	.pf-track {
+		position: relative;
+		display: flex;
+		flex-direction: row;
+		height: 136px;
+	}
+
+	.pf-grid {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 104px;
+	}
+
+	.pf-grid-line {
+		position: absolute;
+		left: 0;
+		right: 0;
+		height: 1px;
+		background-color: #eef1ef;
+	}
+
+	.pf-grid-line.top {
+		top: 0;
+	}
+
+	.pf-grid-line.mid {
+		top: 52px;
+	}
+
+	.pf-grid-line.bottom {
+		top: 103px;
+		background-color: #dfe5e1;
+	}
+
+	.pf-col {
+		position: relative;
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		align-items: center;
+	}
+
+	.pf-col.fixed {
+		flex: none;
+		width: 38px;
+	}
+
+	.pf-plot {
+		display: flex;
+		flex-direction: column;
+		justify-content: flex-end;
+		align-items: center;
+		width: 100%;
+		height: 104px;
+	}
+
+	.pf-bar {
+		width: 18px;
+		border-radius: 5px 5px 0 0;
+		background-color: #9ad9b9;
+	}
+
+	.pf-bar.selected {
+		background-color: #1caf73;
+	}
+
+	.pf-col-date {
+		margin-top: 6px;
+		color: #8d9691;
+		font-size: 10px;
+		white-space: nowrap;
+	}
+
+	.pf-col-sub {
+		color: #a0a8a3;
+		font-size: 9px;
+		white-space: nowrap;
+	}
+
+	.pf-detail {
+		margin-top: 8px;
+		padding: 12px 14px;
+		border-radius: 14px;
+		background-color: #f1faf5;
+	}
+
+	.pf-detail-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.pf-detail-date {
+		color: #526159;
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.pf-detail-close {
+		padding: 4px 0 4px 12px;
+		color: #7d8982;
+		font-size: 13px;
+	}
+
+	.pf-detail-main {
+		display: flex;
+		flex-direction: row;
+		align-items: baseline;
+		margin-top: 4px;
+	}
+
+	.pf-detail-value {
+		margin-right: 6px;
+		color: #1f2a24;
+		font-size: 22px;
+		font-weight: 700;
+	}
+
+	.pf-detail-unit {
+		color: #6e7973;
+		font-size: 12px;
+	}
+
+	.pf-detail-line {
+		display: block;
+		margin-top: 4px;
+		color: #4a5650;
+		font-size: 12px;
+		line-height: 1.6;
+	}
+
+	.pf-sets {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-top: 8px;
+	}
+
+	.pf-set {
+		margin: 0 6px 6px 0;
+		padding: 3px 10px;
+		border-radius: 8px;
+		color: #3f4c45;
+		background-color: #ffffff;
+		font-size: 12px;
+	}
+
+	.pf-set.top {
+		color: #1c8f5e;
+		background-color: #dff3e8;
+		font-weight: 600;
+	}
+
+	.pf-detail-note {
+		display: block;
+		margin-top: 2px;
+		color: #b5762a;
+		font-size: 11px;
+	}
+
+	.pf-last {
+		display: block;
+		margin-top: 12px;
+		color: #4a5650;
+		font-size: 13px;
+		line-height: 1.6;
+	}
+
+	.pf-foot {
+		display: block;
+		margin-top: 8px;
+		color: #a0aaa4;
+		font-size: 11px;
+	}
+</style>

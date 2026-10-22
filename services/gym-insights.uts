@@ -1,0 +1,565 @@
+import { Exercise, parseDate, round1 } from './gym-stats.uts'
+import { DayEntry, SOURCE_CLOUD, SetRecord, addDaysStr, weekStartOf } from './gym-calendar.uts'
+import { isWeightRequired } from './workout-session.uts'
+
+// 数据页（热力图 / 动作表现 / 概览 / 部位分布）的统一统计。
+// 输入全部是 gym-calendar 的 DayEntry（云端 + 本机已结束训练），与首页使用同一数据源和同一“计入”规则：
+// 只统计已结束且有已完成正式组的训练；热身组、未完成组、进行中训练都不参与。
+
+export const WEIGHT_UNIT = 'kg'
+
+// ---------------------------------------------------------------- 热力图
+// 展示分档集中配置（颜色 / 组数区间 / 图例文案）。仅用于展示，不代表训练效果或质量评级。
+export type HeatStep = {
+	level : number
+	min : number
+	max : number
+	color : string
+	label : string
+}
+
+export const HEAT_FUTURE_BORDER = '#d5dbd7'
+
+export const HEAT_STEPS : HeatStep[] = [
+	{ level: 0, min: 0, max: 0, color: '#edf1ee', label: '0 组' } as HeatStep,
+	{ level: 1, min: 1, max: 5, color: '#c8efdc', label: '1–5 组' } as HeatStep,
+	{ level: 2, min: 6, max: 10, color: '#7ed5ac', label: '6–10 组' } as HeatStep,
+	{ level: 3, min: 11, max: 15, color: '#38b97d', label: '11–15 组' } as HeatStep,
+	{ level: 4, min: 16, max: 100000, color: '#168d59', label: '16 组及以上' } as HeatStep
+]
+
+export function heatLevel(sets : number) : number {
+	for (let i = HEAT_STEPS.length - 1; i >= 0; i--) {
+		if (sets >= HEAT_STEPS[i].min) return HEAT_STEPS[i].level
+	}
+	return 0
+}
+
+export type HeatCell = {
+	date : string
+	day : number
+	sets : number
+	level : number
+	color : string
+	today : boolean
+	future : boolean
+}
+
+export type HeatColumn = {
+	key : string
+	// 该周包含某月 1 日时显示月份；第一列在不与下一列冲突时显示所在月份
+	label : string
+	cells : HeatCell[]
+}
+
+export type Heatmap = {
+	columns : HeatColumn[]
+	// 统计范围内（不含未来日期）完成的正式组数与有训练的天数
+	totalSets : number
+	activeDays : number
+}
+
+// 周一至周日按列排布，共 weeks 列，最后一列为本周；本周尚未到的日期标记 future
+export function buildHeatmap(trained : Map<string, number>, today : string, weeks : number) : Heatmap {
+	const start = addDaysStr(weekStartOf(today), -(weeks - 1) * 7)
+	const columns : HeatColumn[] = []
+	const hasFirst : boolean[] = []
+	let totalSets = 0
+	let activeDays = 0
+	for (let w = 0; w < weeks; w++) {
+		const cells : HeatCell[] = []
+		let first = false
+		let label = ''
+		for (let i = 0; i < 7; i++) {
+			const date = addDaysStr(start, w * 7 + i)
+			const d = parseDate(date)
+			const future = date > today
+			const sets = future ? 0 : (trained.get(date) ?? 0)
+			const level = heatLevel(sets)
+			if (!future) {
+				totalSets += sets
+				if (sets > 0) activeDays++
+			}
+			if (d.getDate() == 1) {
+				first = true
+				label = (d.getMonth() + 1) + '月'
+			}
+			cells.push({
+				date: date,
+				day: d.getDate(),
+				sets: sets,
+				level: level,
+				color: future ? 'transparent' : HEAT_STEPS[level].color,
+				today: date == today,
+				future: future
+			} as HeatCell)
+		}
+		hasFirst.push(first)
+		columns.push({ key: cells[0].date, label: label, cells: cells } as HeatColumn)
+	}
+	if (weeks > 1 && !hasFirst[0] && !hasFirst[1]) {
+		columns[0].label = (parseDate(columns[0].cells[0].date).getMonth() + 1) + '月'
+	}
+	return { columns: columns, totalSets: totalSets, activeDays: activeDays } as Heatmap
+}
+
+// ---------------------------------------------------------------- 动作表现
+export const METRIC_WEIGHT = 'weight'
+export const METRIC_VOLUME = 'volume'
+
+export type RangeOption = {
+	days : number
+	label : string
+}
+
+export const RANGE_OPTIONS : RangeOption[] = [
+	{ days: 28, label: '近 4 周' } as RangeOption,
+	{ days: 84, label: '近 12 周' } as RangeOption,
+	{ days: 365, label: '近 1 年' } as RangeOption
+]
+export const DEFAULT_RANGE_DAYS = 84
+
+export function metricLabel(metric : string) : string {
+	return metric == METRIC_VOLUME ? '训练容量' : '最高工作重量'
+}
+
+export function metricDesc(metric : string) : string {
+	if (metric == METRIC_VOLUME) {
+		return '每次训练中该动作已完成正式组的「记录重量 × 次数」之和，单位 ' + WEIGHT_UNIT + '。按记录重量直接计算，不对哑铃单只 / 双只做换算。'
+	}
+	return '每次训练中该动作已完成正式组的最大记录重量，单位 ' + WEIGHT_UNIT + '。不含热身组和未完成组。'
+}
+
+// 一次训练中对某个动作的记录（云端：一条 ExerciseLog；本机：一个动作）
+export type Occurrence = {
+	key : string
+	entryKey : string
+	source : string
+	exerciseId : string
+	name : string
+	category : string
+	date : string
+	at : number
+	sets : SetRecord[]
+}
+
+export type OccurrenceSet = {
+	items : Occurrence[]
+	// 缺少动作 ID、无法可靠归属到某个动作的旧记录数（不按名称猜测）
+	unlinked : number
+}
+
+export function collectOccurrences(entries : DayEntry[]) : OccurrenceSet {
+	const items : Occurrence[] = []
+	const rank : number[] = []
+	const idx : number[] = []
+	let unlinked = 0
+	let counter = 0
+	for (let i = 0; i < entries.length; i++) {
+		const e = entries[i]
+		if (!e.counted) continue
+		for (let j = 0; j < e.exercises.length; j++) {
+			const ex = e.exercises[j]
+			if (ex.records.length == 0) continue
+			if (ex.exerciseId == '') {
+				unlinked++
+				continue
+			}
+			items.push({
+				key: e.key + '#' + j,
+				entryKey: e.key,
+				source: e.source,
+				exerciseId: ex.exerciseId,
+				name: ex.name,
+				category: ex.category,
+				date: e.date,
+				at: e.at,
+				sets: ex.records
+			} as Occurrence)
+			rank.push(e.source == SOURCE_CLOUD ? 0 : 1)
+			idx.push(counter++)
+		}
+	}
+	// 稳定排序：日期 → 云端在前 / 本机在后 → 本机按结束时间 → 原始顺序
+	const order : number[] = []
+	for (let i = 0; i < items.length; i++) order.push(i)
+	order.sort((a : number, b : number) : number => {
+		const x = items[a]
+		const y = items[b]
+		if (x.date != y.date) return x.date < y.date ? -1 : 1
+		if (rank[a] != rank[b]) return rank[a] - rank[b]
+		if (x.at != y.at) return x.at - y.at
+		return idx[a] - idx[b]
+	})
+	const sorted : Occurrence[] = []
+	for (let i = 0; i < order.length; i++) sorted.push(items[order[i]])
+	return { items: sorted, unlinked: unlinked } as OccurrenceSet
+}
+
+export type TrendPoint = {
+	key : string
+	entryKey : string
+	source : string
+	date : string
+	at : number
+	// 同一天内该动作的第几次 / 共几次
+	seq : number
+	countOnDate : number
+	sets : SetRecord[]
+	// 参与计算的组数与被跳过的组数（重量或次数缺失 / 不合法）
+	usedSets : number
+	skippedSets : number
+	hasValue : boolean
+	maxWeight : number
+	// 重量等于最高重量的全部组，按记录顺序
+	topSets : SetRecord[]
+	volume : number
+	value : number
+}
+
+function validSet(s : SetRecord) : boolean {
+	return s.weight > 0 && s.reps > 0
+}
+
+export function makePoint(o : Occurrence, seq : number, countOnDate : number, metric : string) : TrendPoint {
+	let max = 0
+	let volume = 0
+	let used = 0
+	for (let i = 0; i < o.sets.length; i++) {
+		const s = o.sets[i]
+		if (!validSet(s)) continue
+		used++
+		volume += s.weight * s.reps
+		if (s.weight > max) max = s.weight
+	}
+	const top : SetRecord[] = []
+	for (let i = 0; i < o.sets.length; i++) {
+		if (validSet(o.sets[i]) && o.sets[i].weight == max) top.push(o.sets[i])
+	}
+	const vol = round1(volume)
+	return {
+		key: o.key,
+		entryKey: o.entryKey,
+		source: o.source,
+		date: o.date,
+		at: o.at,
+		seq: seq,
+		countOnDate: countOnDate,
+		sets: o.sets,
+		usedSets: used,
+		skippedSets: o.sets.length - used,
+		hasValue: used > 0,
+		maxWeight: max,
+		topSets: top,
+		volume: vol,
+		value: metric == METRIC_VOLUME ? vol : max
+	} as TrendPoint
+}
+
+// 容量公式文本，例如 “60 × 10 + 62.5 × 8 = 1100 kg”
+export function volumeFormula(p : TrendPoint) : string {
+	const parts : string[] = []
+	for (let i = 0; i < p.sets.length; i++) {
+		if (validSet(p.sets[i])) parts.push(p.sets[i].weight + ' × ' + p.sets[i].reps)
+	}
+	return parts.join(' + ') + ' = ' + p.volume + ' ' + WEIGHT_UNIT
+}
+
+// 不依赖外部输入的纵轴上限：取 1 / 2 / 5 × 10^n 中不小于 max 的最小值
+export function niceMax(v : number) : number {
+	if (v <= 0) return 10
+	let step = 1
+	while (step * 10 <= v) step *= 10
+	while (step > v) step /= 10
+	const cands : number[] = [1, 2, 5, 10]
+	for (let i = 0; i < cands.length; i++) {
+		if (cands[i] * step >= v) return cands[i] * step
+	}
+	return 10 * step
+}
+
+export type TrendResult = {
+	// 该动作是否支持重量类指标（自重 / 核心类动作没有明确的重量口径，不支持）
+	supported : boolean
+	// 该动作全部历史训练次数
+	total : number
+	// 时间范围内可计算的数据点，按时间升序
+	points : TrendPoint[]
+	// 时间范围内因缺少有效重量 / 次数而无法计算的次数
+	noValue : number
+	axisMax : number
+	ticks : number[]
+	// 全部历史中的最近一次（与时间范围无关）
+	last : TrendPoint | null
+}
+
+export function exerciseSupportsLoad(exerciseId : string, category : string) : boolean {
+	return isWeightRequired(exerciseId, category)
+}
+
+// items 需来自 collectOccurrences（已按时间排序）；缺失值不会被当作 0 画出
+export function buildTrend(items : Occurrence[], exerciseId : string, category : string, metric : string, today : string, days : number) : TrendResult {
+	const mine : Occurrence[] = items.filter((o : Occurrence) : boolean => o.exerciseId == exerciseId)
+	const perDate = new Map<string, number>()
+	for (let i = 0; i < mine.length; i++) perDate.set(mine[i].date, (perDate.get(mine[i].date) ?? 0) + 1)
+	const seen = new Map<string, number>()
+	const from = addDaysStr(today, -(days - 1))
+	const supported = exerciseSupportsLoad(exerciseId, category)
+	const points : TrendPoint[] = []
+	let noValue = 0
+	let last : TrendPoint | null = null
+	let maxValue = 0
+	for (let i = 0; i < mine.length; i++) {
+		const o = mine[i]
+		const seq = (seen.get(o.date) ?? 0) + 1
+		seen.set(o.date, seq)
+		const p = makePoint(o, seq, perDate.get(o.date) ?? 1, metric)
+		if (o.date <= today) last = p
+		if (!supported || o.date < from || o.date > today) continue
+		if (!p.hasValue) {
+			noValue++
+			continue
+		}
+		points.push(p)
+		if (p.value > maxValue) maxValue = p.value
+	}
+	const axisMax = niceMax(maxValue)
+	return {
+		supported: supported,
+		total: mine.length,
+		points: points,
+		noValue: noValue,
+		axisMax: axisMax,
+		ticks: [0, round1(axisMax / 2), axisMax],
+		last: last
+	} as TrendResult
+}
+
+// ---------------------------------------------------------------- 动作选择
+export type ExerciseOption = {
+	id : string
+	name : string
+	sub : string
+	category : string
+	pinyin : string
+	count : number
+	lastDate : string
+	// false：只在训练记录中出现、不在当前动作库里
+	inLibrary : boolean
+}
+
+// 有记录的动作在前（最近训练日期倒序，其次次数），没有记录的保持动作库顺序；按 ID 关联，变式不合并
+export function buildExerciseOptions(library : Exercise[], items : Occurrence[]) : ExerciseOption[] {
+	const stat = new Map<string, ExerciseOption>()
+	for (let i = 0; i < items.length; i++) {
+		const o = items[i]
+		const cur = stat.get(o.exerciseId)
+		if (cur == null) {
+			stat.set(o.exerciseId, { id: o.exerciseId, name: o.name, sub: '', category: o.category, pinyin: '', count: 1, lastDate: o.date, inLibrary: false } as ExerciseOption)
+		} else {
+			cur.count++
+			cur.lastDate = o.date
+			cur.name = o.name
+		}
+	}
+	const withData : ExerciseOption[] = []
+	const without : ExerciseOption[] = []
+	const used : string[] = []
+	for (let i = 0; i < library.length; i++) {
+		const ex = library[i]
+		const s = stat.get(ex._id)
+		used.push(ex._id)
+		const opt = {
+			id: ex._id,
+			name: ex.name,
+			sub: ex.sub,
+			category: ex.category,
+			pinyin: ex.pinyin,
+			count: s == null ? 0 : s.count,
+			lastDate: s == null ? '' : s.lastDate,
+			inLibrary: true
+		} as ExerciseOption
+		if (opt.count > 0) withData.push(opt)
+		else without.push(opt)
+	}
+	stat.forEach((value : ExerciseOption, key : string) => {
+		if (!used.includes(key)) withData.push(value)
+	})
+	withData.sort((a : ExerciseOption, b : ExerciseOption) : number => {
+		if (a.lastDate != b.lastDate) return a.lastDate < b.lastDate ? 1 : -1
+		return b.count - a.count
+	})
+	return withData.concat(without)
+}
+
+export function filterExerciseOptions(options : ExerciseOption[], keyword : string) : ExerciseOption[] {
+	const k = keyword.trim().toLowerCase()
+	if (k == '') return options
+	return options.filter((o : ExerciseOption) : boolean => {
+		return o.name.toLowerCase().includes(k) || o.sub.toLowerCase().includes(k) || o.category.toLowerCase().includes(k) || o.pinyin.toLowerCase().includes(k)
+	})
+}
+
+// 本地偏好：保存的动作 / 指标 / 时间范围。不合法的值回退为默认，不报错
+export type InsightPrefs = {
+	exerciseId : string
+	metric : string
+	rangeDays : number
+}
+
+export function defaultPrefs() : InsightPrefs {
+	return { exerciseId: '', metric: METRIC_WEIGHT, rangeDays: DEFAULT_RANGE_DAYS } as InsightPrefs
+}
+
+export function sanitizePrefs(raw : any | null) : InsightPrefs {
+	const p = defaultPrefs()
+	if (raw == null) return p
+	const src = raw as InsightPrefs
+	if (src.exerciseId != null && ('' + src.exerciseId) != '') p.exerciseId = '' + src.exerciseId
+	if (src.metric == METRIC_VOLUME) p.metric = METRIC_VOLUME
+	for (let i = 0; i < RANGE_OPTIONS.length; i++) {
+		if (RANGE_OPTIONS[i].days == src.rangeDays) p.rangeDays = src.rangeDays
+	}
+	return p
+}
+
+// 当前应展示的动作：偏好中的动作仍存在则用它；否则取最近训练过的动作；都没有则取动作库第一个
+export function resolveExerciseId(options : ExerciseOption[], prefId : string) : string {
+	if (prefId != '') {
+		for (let i = 0; i < options.length; i++) {
+			if (options[i].id == prefId) return prefId
+		}
+	}
+	return options.length > 0 ? options[0].id : ''
+}
+
+// ---------------------------------------------------------------- 概览与部位分布
+export type Overview = {
+	// 近 90 天有训练的天数（与首页周 / 月口径一致）
+	days : number
+	tons : number
+	// 近 90 天总容量（kg）与总时长（分钟），展示层再按量级换算单位
+	volumeKg : number
+	minutes : number
+	hours : number
+	avgMinutes : number
+	tonsChangePct : number
+	hasPrev : boolean
+}
+
+export type ValueUnit = {
+	value : string
+	unit : string
+}
+
+function trimZeros(n : number, digits : number) : string {
+	let s = n.toFixed(digits)
+	if (s.indexOf('.') >= 0) {
+		while (s.endsWith('0')) s = s.substring(0, s.length - 1)
+		if (s.endsWith('.')) s = s.substring(0, s.length - 1)
+	}
+	return s
+}
+
+// 总容量展示：不足 1000 kg 用 kg（最多 1 位小数），达到 1000 kg 才换算成吨（最多 2 位小数，去掉尾零）。只用于合计，不用于单组重量
+export function formatVolume(kg : number) : ValueUnit {
+	if (kg >= 1000) return { value: trimZeros(kg / 1000, 2), unit: '吨' } as ValueUnit
+	return { value: trimZeros(kg, 1), unit: 'kg' } as ValueUnit
+}
+
+// 总时长展示：不足 1 小时用分钟，之后用小时（最多 1 位小数）；没有有效时长显示“—”
+export function formatDuration(minutes : number) : ValueUnit {
+	if (minutes <= 0) return { value: '—', unit: '' } as ValueUnit
+	if (minutes < 60) return { value: '' + Math.round(minutes), unit: '分钟' } as ValueUnit
+	return { value: trimZeros(minutes / 60, 1), unit: 'h' } as ValueUnit
+}
+
+export function calcOverview(entries : DayEntry[], today : string) : Overview {
+	const cur0 = addDaysStr(today, -89)
+	const prev0 = addDaysStr(today, -179)
+	const dates : string[] = []
+	let count = 0
+	let volume = 0
+	let minutes = 0
+	let prevVolume = 0
+	for (let i = 0; i < entries.length; i++) {
+		const e = entries[i]
+		if (!e.counted || e.date > today) continue
+		if (e.date >= cur0) {
+			count++
+			if (!dates.includes(e.date)) dates.push(e.date)
+			volume += e.volume
+			minutes += e.durationMin
+		} else if (e.date >= prev0) {
+			prevVolume += e.volume
+		}
+	}
+	return {
+		days: dates.length,
+		tons: round1(volume / 1000),
+		volumeKg: round1(volume),
+		minutes: minutes,
+		hours: round1(minutes / 60),
+		avgMinutes: count > 0 ? Math.round(minutes / count) : 0,
+		tonsChangePct: prevVolume > 0 ? round1((volume - prevVolume) / prevVolume * 100) : 0,
+		hasPrev: prevVolume > 0
+	} as Overview
+}
+
+export type MuscleShare = {
+	name : string
+	percent : number
+}
+
+export type MuscleStats = {
+	totalSets : number
+	shares : MuscleShare[]
+}
+
+// 近 90 天按已完成正式组数统计：胸 / 背 / 腿 / 其他（缺少动作明细的旧汇总记录不参与）
+export function calcMuscleStats(entries : DayEntry[], today : string) : MuscleStats {
+	const since = addDaysStr(today, -89)
+	const counts : number[] = [0, 0, 0, 0]
+	let total = 0
+	for (let i = 0; i < entries.length; i++) {
+		const e = entries[i]
+		if (!e.counted || e.date < since || e.date > today) continue
+		for (let j = 0; j < e.exercises.length; j++) {
+			const ex = e.exercises[j]
+			let slot = 3
+			if (ex.category == '胸') slot = 0
+			else if (ex.category == '背') slot = 1
+			else if (ex.category == '腿') slot = 2
+			counts[slot] += ex.workSets
+			total += ex.workSets
+		}
+	}
+	const names : string[] = ['胸部', '背部', '腿部', '其他']
+	const shares : MuscleShare[] = []
+	let used = 0
+	for (let i = 0; i < 4; i++) {
+		let percent = 0
+		if (total > 0) percent = i == 3 ? 100 - used : Math.round(counts[i] / total * 100)
+		used += percent
+		shares.push({ name: names[i], percent: percent } as MuscleShare)
+	}
+	return { totalSets: total, shares: shares } as MuscleStats
+}
+
+export function shortDate(date : string) : string {
+	const d = parseDate(date)
+	return (d.getMonth() + 1) + '月' + d.getDate() + '日'
+}
+
+export function slashDate(date : string) : string {
+	const d = parseDate(date)
+	return (d.getMonth() + 1) + '/' + d.getDate()
+}
+
+export function clockLabel(at : number) : string {
+	if (at <= 0) return ''
+	const d = new Date(at)
+	const h = d.getHours()
+	const m = d.getMinutes()
+	return (h < 10 ? '0' + h : '' + h) + ':' + (m < 10 ? '0' + m : '' + m)
+}

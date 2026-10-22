@@ -1,0 +1,39 @@
+import { WorkoutSession } from './workout-session.uts'
+
+// 首页“开始 / 继续训练”的决策（纯逻辑）。
+// 日历选中日期不参与：只有“今天”（点击时的当前本地日期）和现有草稿的身份（ID、开始日期、状态）。
+export const PLAN_CONTINUE = 'continue'
+export const PLAN_CONFLICT = 'conflict'
+export const PLAN_FAILED_LAST = 'failed-last'
+export const PLAN_NEW = 'new'
+
+export type StartPlan = {
+	// continue：继续今天开始的未结束训练 | conflict：存在其他日期开始的未结束草稿，需要用户选择
+	// failed-last：上一场训练提交云端失败，询问是否先查看重试 | new：开始今天的新训练
+	kind : string
+	// continue / conflict / failed-last 时指向明确的训练 ID，new 时为空串
+	sessionId : string
+	// 对应训练的开始日期
+	date : string
+}
+
+function plan(kind : string, id : string, date : string) : StartPlan {
+	return { kind: kind, sessionId: id, date: date } as StartPlan
+}
+
+// current：当前会话；parked：本机历史中仍未结束的草稿由 history 过滤得到
+export function planStart(current : WorkoutSession | null, history : WorkoutSession[], today : string) : StartPlan {
+	const actives : WorkoutSession[] = []
+	if (current != null && current.status == 'active') actives.push(current)
+	for (let i = 0; i < history.length; i++) {
+		if (history[i].status == 'active' && !actives.some((a : WorkoutSession) : boolean => a.id == history[i].id)) actives.push(history[i])
+	}
+	for (let i = 0; i < actives.length; i++) {
+		if (actives[i].date == today) return plan(PLAN_CONTINUE, actives[i].id, actives[i].date)
+	}
+	if (current != null && current.status == 'finished' && current.cloudStatus == 'failed') {
+		return plan(PLAN_FAILED_LAST, current.id, current.date)
+	}
+	if (actives.length > 0) return plan(PLAN_CONFLICT, actives[0].id, actives[0].date)
+	return plan(PLAN_NEW, '', '')
+}

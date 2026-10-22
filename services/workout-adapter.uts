@@ -1,44 +1,8 @@
-import { ExerciseLog, SetLog } from './gym-stats.uts'
-import { saveExerciseLog } from './gym-api.uts'
-import { KIND_WARMUP, SessionExercise, WorkoutSession, durationMinutes, isCountedSet, parseWeight, saveSession } from './workout-session.uts'
+import { WorkoutSession } from './workout-session.uts'
+import { cloudStatus, retryCloud } from './gym-cloud.uts'
 
-// 本机训练会话 → 现有云端接口的唯一映射处。
-// 当前云端只认识 { weight, reps, done }：热身组、实际 RIR、目标、组 ID 均不提交，仅留在本机。
-// 后端支持新字段后，只需修改 toCloudLog。
-export function toCloudLog(ex : SessionExercise) : ExerciseLog | null {
-	const sets : SetLog[] = []
-	for (let i = 0; i < ex.sets.length; i++) {
-		const s = ex.sets[i]
-		if (s.kind == KIND_WARMUP || !isCountedSet(s, ex.weightRequired)) continue
-		sets.push({ weight: parseWeight(s.weight), reps: parseInt(s.reps), done: true } as SetLog)
-	}
-	if (sets.length == 0) return null
-	return { exerciseId: ex.exerciseId, name: ex.name, category: ex.category, sets: sets } as ExerciseLog
-}
-
-// 逐个动作提交已结束的训练。已成功的动作带有 cloudSynced 标记，重试时不会重复写入。
-// 返回并写回会话的 cloudStatus：synced | failed | skipped
+// Reuses the durable outbox written by saveSession; never appends per-exercise logs.
 export async function syncSessionToCloud(session : WorkoutSession) : Promise<string> {
-	let failed = false
-	let wrote = false
-	for (let i = 0; i < session.exercises.length; i++) {
-		const ex = session.exercises[i]
-		if (ex.cloudSynced) continue
-		const log = toCloudLog(ex)
-		if (log == null) continue
-		try {
-			await saveExerciseLog(log, session.durationSent ? 0 : durationMinutes(session), session.date)
-			ex.cloudSynced = true
-			session.durationSent = true
-			wrote = true
-			saveSession(session)
-		} catch (e) {
-			failed = true
-			break
-		}
-	}
-	session.cloudStatus = failed ? 'failed' : 'synced'
-	saveSession(session)
-	if (wrote) uni.$emit('workout-saved')
-	return session.cloudStatus
+	await retryCloud('session', session.id)
+	return cloudStatus('session', session.id)
 }

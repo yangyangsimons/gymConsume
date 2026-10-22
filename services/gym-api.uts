@@ -1,89 +1,43 @@
-import { Exercise, ExerciseLog, Workout, addDays, formatDate, round1, setVolume } from './gym-stats.uts'
+import { Exercise, Workout } from './gym-stats.uts'
+import { cloudRows } from './gym-cloud.uts'
 
-const PAGE_SIZE = 20
-const HISTORY_DAYS = 365
-
-let exercisesPromise : Promise<Exercise[]> | null = null
-let workoutsPromise : Promise<Workout[]> | null = null
-
-function getDb() : any {
-	return wx.cloud.database()
+type ReadReply = {
+	ok : boolean
+	code ?: string
+	rows : UTSJSONObject[]
 }
 
-async function fetchAll(makeQuery : (skip : number) => any) : Promise<any[]> {
-	const out : any[] = []
+async function readPage(action : string, skip : number) : Promise<UTSJSONObject[]> {
+	const result = await wx.cloud.callFunction({ name: 'gymData', data: { action: action, skip: skip } })
+	const reply = result.result as ReadReply
+	if (reply == null || !reply.ok) throw new Error(reply?.code ?? 'INVALID_CLOUD_RESPONSE')
+	return reply.rows
+}
+
+async function fetchAll(action : string) : Promise<UTSJSONObject[]> {
+	const rows : UTSJSONObject[] = []
 	while (true) {
-		const res = await makeQuery(out.length).get()
-		const data = res.data as any[]
-		for (let i = 0; i < data.length; i++) out.push(data[i])
-		if (data.length < PAGE_SIZE) break
+		const page = await readPage(action, rows.length)
+		for (let i = 0; i < page.length; i++) rows.push(page[i])
+		if (page.length < 20) return rows
+	}
+}
+
+export async function loadExercises() : Promise<Exercise[]> {
+	const rows = await fetchAll('library')
+	const out : Exercise[] = []
+	for (let i = 0; i < rows.length; i++) out.push(rows[i] as Exercise)
+	const custom = cloudRows('exercise')
+	for (let i = 0; i < custom.length; i++) {
+		const ex = custom[i].value as Exercise
+		if (ex != null && !out.some((e : Exercise) : boolean => e._id == ex._id)) out.push(ex)
 	}
 	return out
 }
 
-export function loadExercises() : Promise<Exercise[]> {
-	if (exercisesPromise == null) {
-		const db = getDb()
-		const p = fetchAll((skip : number) : any => db.collection('exercises').orderBy('sort', 'asc').skip(skip).limit(PAGE_SIZE))
-			.then((rows : any[]) : Exercise[] => rows as Exercise[])
-		p.catch(() => { exercisesPromise = null })
-		exercisesPromise = p
-	}
-	return exercisesPromise!
-}
-
-// 近一年训练记录，按日期倒序；保存后会失效重新拉取
-export function loadWorkouts() : Promise<Workout[]> {
-	if (workoutsPromise == null) {
-		const db = getDb()
-		const _ = db.command
-		const since = formatDate(addDays(new Date(), -(HISTORY_DAYS - 1)))
-		const p = fetchAll((skip : number) : any => db.collection('workouts')
-			.where({ date: _.gte(since) })
-			.orderBy('date', 'desc')
-			.skip(skip)
-			.limit(PAGE_SIZE))
-			.then((rows : any[]) : Workout[] => rows as Workout[])
-		p.catch(() => { workoutsPromise = null })
-		workoutsPromise = p
-	}
-	return workoutsPromise!
-}
-
-// 同一天的多个动作累加到当天的一条训练记录中
-// date 缺省为今天（YYYY-MM-DD）；跨天结束的训练按开始日期提交
-export async function saveExerciseLog(log : ExerciseLog, durationMin : number, date : string = '') : Promise<void> {
-	const db = getDb()
-	const _ = db.command
-	const today = date == '' ? formatDate(new Date()) : date
-	let doneSets = 0
-	for (let i = 0; i < log.sets.length; i++) {
-		if (log.sets[i].done) doneSets++
-	}
-	const volume = round1(setVolume(log.sets))
-
-	const found = await db.collection('workouts').where({ date: today }).limit(1).get()
-	const rows = found.data as any[]
-	if (rows.length > 0) {
-		await db.collection('workouts').doc(rows[0]._id as string).update({
-			data: {
-				exercises: _.push(log),
-				totalSets: _.inc(doneSets),
-				totalVolume: _.inc(volume),
-				durationMin: _.inc(durationMin)
-			}
-		})
-	} else {
-		await db.collection('workouts').add({
-			data: {
-				date: today,
-				exercises: [log],
-				totalSets: doneSets,
-				totalVolume: volume,
-				durationMin: durationMin,
-				createdAt: Date.now()
-			}
-		})
-	}
-	workoutsPromise = null
+// Legacy cloud records are read only and scoped by trusted OPENID in gymData.
+// New records/drafts retain the full WorkoutSession schema in gym_private.
+export async function loadWorkouts() : Promise<Workout[]> {
+	const rows = await fetchAll('legacy')
+	return rows.map((row : UTSJSONObject) : Workout => row as Workout)
 }

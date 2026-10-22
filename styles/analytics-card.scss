@@ -1,0 +1,40 @@
+// 数据页卡片的公共样式（小程序组件样式相互隔离，各卡片组件按需引入）
+.analytics-card {
+	margin-top: 14px;
+	padding: 16px;
+	border-width: 1px;
+	border-style: solid;
+	border-color: #e9edea;
+	border-radius: 22px;
+	background-color: #ffffff;
+}
+
+.section-heading {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 17px;
+}
+
+.section-kicker {
+	display: block;
+	margin-bottom: 6px;
+	color: #7d8982;
+	font-size: 11px;
+	font-weight: 700;
+}
+
+.section-title {
+	color: #1f2a24;
+	font-size: 18px;
+}
+
+.demo-tag {
+	padding: 3px 8px;
+	border-radius: 7px;
+	color: #a35f0f;
+	background-color: #fdf0dc;
+	font-size: 11px;
+	font-weight: 700;
+}

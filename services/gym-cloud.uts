@@ -1,0 +1,280 @@
+// Payloads remain the existing versioned local structures. Revisions are server-owned.
+export type CloudRow = {
+	_id : string
+	kind : string
+	id : string
+	revision : number
+	deleted : boolean
+	value : UTSJSONObject | null
+}
+type PendingWrite = {
+	kind : string
+	id : string
+	json : string
+	revision : number
+	removed : boolean
+	error : string
+}
+type CloudState = {
+	rows : CloudRow[]
+	pending : PendingWrite[]
+}
+type CloudReply = {
+	ok : boolean
+	code ?: string
+	owner ?: string
+	rows ?: CloudRow[]
+	row ?: CloudRow | null
+	next ?: string
+}
+type OwnRevisionChain = { kind : string, id : string, from : number, to : number }
+const PREFIX = 'gymConsume.cloud.v1.'
+let owner = ''
+let ready = false
+let timer = -1
+let running : Promise<void> | null = null
+let refreshing : Promise<void> | null = null
+let state : CloudState = { rows: [], pending: [] }
+let ownChains : OwnRevisionChain[] = []
+let readVersions = new Map<string, number>()
+
+function storageError(e : unknown) {
+	console.error('Cloud local journal failed', e)
+	uni.showToast({ title: '同步日志保存失败，请勿关闭页面', icon: 'none' })
+}
+
+function persist() {
+	try {
+		uni.setStorageSync(PREFIX + (owner == '' ? 'unbound' : owner), JSON.stringify(state))
+	} catch (e) {
+		storageError(e)
+		throw e
+	}
+}
+
+function readState(key : string) : CloudState {
+	const raw = uni.getStorageSync(PREFIX + key)
+	if (raw == '' || raw == null) return { rows: [], pending: [] }
+	return JSON.parse(raw as string) as CloudState
+}
+
+function restore() {
+	try {
+		const cached = uni.getStorageSync(PREFIX + 'owner')
+		owner = typeof cached == 'string' ? cached : ''
+		state = readState(owner == '' ? 'unbound' : owner)
+	} catch (e) {
+		storageError(e)
+	}
+}
+restore()
+
+export async function callGymCloud(data : UTSJSONObject) : Promise<CloudReply> {
+	const result = await wx.cloud.callFunction({ name: 'gymData', data: data })
+	const reply = result.result as CloudReply
+	if (reply == null || reply.ok != true) throw new Error(reply?.code ?? 'INVALID_CLOUD_RESPONSE')
+	return reply
+}
+
+function pendingFor(kind : string, id : string) : PendingWrite | null {
+	return state.pending.find((p : PendingWrite) : boolean => p.kind == kind && p.id == id) ?? null
+}
+
+function rowFor(kind : string, id : string) : CloudRow | null {
+	return state.rows.find((r : CloudRow) : boolean => r.kind == kind && r.id == id) ?? null
+}
+
+export function cloudStatus(kind : string, id : string) : string {
+	const pending = pendingFor(kind, id)
+	if (pending != null) return pending.error == '' ? 'pending' : 'failed'
+	return rowFor(kind, id) != null ? 'synced' : 'none'
+}
+
+export function cloudRevision(kind : string, id : string) : number {
+	return pendingFor(kind, id)?.revision ?? rowFor(kind, id)?.revision ?? 0
+}
+
+export function syncSummary() : string {
+	if (state.pending.some((p : PendingWrite) : boolean => p.error == 'CONFLICT')) return '版本冲突 · 本机修改已保留'
+	if (state.pending.length > 0) return '有数据待同步 · 点击重试'
+	return ready ? '已连接云端 · 本机旧数据未自动迁移' : '尚未连接云端 · 点击重试'
+}
+
+export function cloudValue(kind : string, id : string) : UTSJSONObject | null {
+	if (pendingFor(kind, id) != null) return null
+	const row = rowFor(kind, id)
+	readVersions.set(kind + ':' + id, row?.revision ?? 0)
+	return row == null || row.deleted ? null : row.value
+}
+
+export function cloudRows(kind : string) : CloudRow[] {
+	return state.rows.filter((r : CloudRow) : boolean => r.kind == kind && !r.deleted && pendingFor(kind, r.id) == null)
+}
+
+export function canUseLocal(kind : string, id : string) : boolean {
+	const pending = pendingFor(kind, id)
+	if (pending != null && pending.removed) return false
+	const row = rowFor(kind, id)
+	if (pending == null && row != null && row.deleted) return false
+	const bound = uni.getStorageSync(PREFIX + 'binding.' + kind + '.' + id)
+	return bound == '' || bound == null || bound == owner
+}
+
+export function queueCloud(kind : string, id : string, json : string, removed : boolean = false, baseRevision : number = -1) {
+	if (id.startsWith('demo-') || id.startsWith('demo_')) return
+	const old = pendingFor(kind, id)
+	const row = rowFor(kind, id)
+	let revision = baseRevision >= 0 ? baseRevision : (readVersions.get(kind + ':' + id) ?? 0)
+	const chain = ownChains.find((c : OwnRevisionChain) : boolean => c.kind == kind && c.id == id)
+	// Only advance over this process's own acknowledgements, never another device's update.
+	if (chain != null && row?.revision == chain.to && revision >= chain.from && revision <= chain.to) revision = chain.to
+	const next : PendingWrite = {
+		kind: kind, id: id, json: json, removed: removed,
+		revision: old != null ? old.revision : revision,
+		error: old?.error == 'CONFLICT' ? 'CONFLICT' : ''
+	}
+	state.pending = state.pending.filter((p : PendingWrite) : boolean => p.kind != kind || p.id != id)
+	state.pending.push(next)
+	if (owner != '') uni.setStorageSync(PREFIX + 'binding.' + kind + '.' + id, owner)
+	persist()
+	uni.$emit('cloud-sync-changed')
+	if (timer != -1) clearTimeout(timer)
+	timer = setTimeout(() => {
+		timer = -1
+		flushCloud().catch((e : unknown) => console.error('Draft sync failed; retained locally', e))
+	}, 1200)
+}
+
+function replaceRow(row : CloudRow) {
+	state.rows = state.rows.filter((r : CloudRow) : boolean => r.kind != row.kind || r.id != row.id)
+	state.rows.push(row)
+}
+
+async function sendPending() : Promise<void> {
+	if (!ready) return
+	while (true) {
+		const next = state.pending.find((p : PendingWrite) : boolean => p.error != 'CONFLICT')
+		if (next == null) break
+		const p = { ...next } as PendingWrite
+		try {
+			const reply = await callGymCloud({
+				action: p.removed ? 'remove' : 'put', kind: p.kind, id: p.id,
+				revision: p.revision, value: p.removed ? null : JSON.parse(p.json)
+			})
+			const row = reply.row!
+			const chain = ownChains.find((c : OwnRevisionChain) : boolean => c.kind == p.kind && c.id == p.id)
+			const from = chain != null && chain.to == p.revision ? chain.from : p.revision
+			ownChains = ownChains.filter((c : OwnRevisionChain) : boolean => c.kind != p.kind || c.id != p.id)
+			ownChains.push({ kind: p.kind, id: p.id, from: from, to: row.revision })
+			replaceRow(row)
+			const latest = pendingFor(p.kind, p.id)
+			if (latest != null) {
+				if (latest.json == p.json && latest.removed == p.removed) {
+					state.pending = state.pending.filter((x : PendingWrite) : boolean => x !== latest)
+				} else {
+					latest.revision = row.revision
+				}
+			}
+			persist()
+			uni.$emit('workout-saved')
+		} catch (e) {
+			console.error('Cloud sync failed', e)
+			const latest = pendingFor(p.kind, p.id)
+			if (latest != null) latest.error = (e as Error).message
+			persist()
+			uni.$emit('cloud-sync-changed')
+			throw e
+		}
+	}
+	uni.$emit('cloud-sync-changed')
+	if (state.pending.some((p : PendingWrite) : boolean => p.error == '')) {
+		timer = setTimeout(() => {
+			timer = -1
+			flushCloud().catch((e : unknown) => console.error('Queued sync retained locally', e))
+		}, 1200)
+	}
+}
+
+export function flushCloud() : Promise<void> {
+	if (timer != -1) { clearTimeout(timer); timer = -1 }
+	if (running != null) return running!
+	const task = sendPending()
+	running = task
+	task.then(() => { running = null }).catch(() => { running = null })
+	return task
+}
+
+async function refresh() : Promise<void> {
+	ready = false
+	if (running != null) await running!.catch((e : unknown) => console.error('Previous sync retained for retry', e))
+	const identity = await callGymCloud({ action: 'identity' })
+	const nextOwner = identity.owner!
+	if (owner != nextOwner) {
+		ownChains = []
+		readVersions = new Map<string, number>()
+		const firstBinding = owner == ''
+		owner = nextOwner
+		const previous = state
+		state = readState(owner)
+		if (firstBinding) state.pending = state.pending.concat(previous.pending)
+		for (let i = 0; i < state.pending.length; i++) {
+			const p = state.pending[i]
+			uni.setStorageSync(PREFIX + 'binding.' + p.kind + '.' + p.id, owner)
+		}
+		uni.setStorageSync(PREFIX + 'owner', owner)
+	}
+	ready = true
+	let cursor = ''
+	const rows : CloudRow[] = []
+	do {
+		const reply = await callGymCloud({ action: 'list', after: cursor })
+		const page = reply.rows!
+		for (let i = 0; i < page.length; i++) rows.push(page[i])
+		cursor = reply.next!
+	} while (cursor != '')
+	// First visit: the server assigns a nickname bound to the trusted WeChat identity.
+	if (!rows.some((r : CloudRow) : boolean => r.kind == 'profile' && r.id == 'user')) {
+		const created = await callGymCloud({ action: 'ensureProfile' })
+		rows.push(created.row!)
+	}
+	state.rows = rows
+	persist()
+	uni.$emit('workout-saved')
+	await flushCloud()
+}
+
+export function refreshCloudData() : Promise<void> {
+	if (refreshing != null) return refreshing!
+	const task = refresh()
+	refreshing = task
+	task.then(() => { refreshing = null }).catch((e : unknown) => {
+		refreshing = null
+		ready = false
+		console.error('Cloud refresh failed; using retained local data', e)
+		uni.showToast({ title: '云端未连接，数据保留在本机', icon: 'none' })
+	})
+	return task
+}
+
+export async function retryCloud(kind : string, id : string) : Promise<void> {
+	await refreshCloudData()
+	const pending = pendingFor(kind, id)
+	if (pending != null && pending.error == 'CONFLICT') {
+		const choice = await uni.showModal({
+			title: '云端已有较新版本',
+			content: '本机修改尚未覆盖云端。确认用本机修改替换云端版本？取消则继续保留两份数据。',
+			confirmText: '使用本机', cancelText: '保留两份'
+		})
+		if (!choice.confirm) return
+		pending.revision = rowFor(kind, id)?.revision ?? 0
+		pending.error = ''
+		persist()
+	}
+	await flushCloud()
+}
+
+export async function retryAllCloud() : Promise<void> {
+	await refreshCloudData()
+	const conflicts = state.pending.filter((p : PendingWrite) : boolean => p.error == 'CONFLICT')
+	for (let i = 0; i < conflicts.length; i++) await retryCloud(conflicts[i].kind, conflicts[i].id)
+}
