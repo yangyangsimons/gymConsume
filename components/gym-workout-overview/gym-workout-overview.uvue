@@ -12,7 +12,7 @@
 							<text class="ov-kicker">{{ kicker }}</text>
 							<text class="ov-date">{{ dateLabel }}</text>
 						</view>
-						<text class="ov-tag" :class="{ done: isFinished }">{{ isFinished ? '已结束' : '进行中' }}</text>
+						<text class="ov-tag" :class="{ done: isFinished }">{{ isFinished ? '已结束' : '未结束' }}</text>
 					</view>
 					<view class="ov-stats" v-if="isFinished">
 						<view class="ov-stat">
@@ -26,10 +26,6 @@
 						<view class="ov-stat">
 							<text class="ov-stat-value">{{ totals.volume }}</text>
 							<text class="ov-stat-label">容量 kg</text>
-						</view>
-						<view class="ov-stat">
-							<text class="ov-stat-value">{{ minutes }}</text>
-							<text class="ov-stat-label">用时 分钟</text>
 						</view>
 					</view>
 					<text class="ov-sub" v-else>{{ totals.exercises }} 个动作 · 已完成 {{ totals.workDone }} 个正式组</text>
@@ -77,7 +73,7 @@
 				<button class="ov-primary" @click="goHome">返回首页</button>
 			</view>
 			<view class="ov-footer-row" v-else-if="isFinished">
-				<button class="ov-secondary" v-if="session != null && session.cloudStatus === 'failed'" :disabled="syncing"
+				<button class="ov-secondary" v-if="session != null && (session.cloudStatus === 'failed' || session.cloudStatus === 'pending')" :disabled="syncing"
 					@click="onRetry">{{ syncing ? '提交中…' : '重试提交' }}</button>
 				<button class="ov-primary" @click="goHome">返回首页</button>
 			</view>
@@ -93,8 +89,8 @@
 <script setup lang="uts">
 	import { formatDate, parseDate } from '@/services/gym-stats.uts'
 	import {
-		SessionTotals, WorkoutSession, activateSession, durationMinutes, exerciseProgress, exerciseVolume, finishSession, formatTarget,
-		loadSession, saveSession, sessionTotals
+		SessionTotals, WorkoutSession, activateSession, exerciseProgress, exerciseVolume, finishSession, formatTarget,
+		loadSession, saveSession, sessionHasFilledSets, sessionTotals
 	} from '@/services/workout-session.uts'
 	import { syncSessionToCloud } from '@/services/workout-adapter.uts'
 	import { confirmDialog } from '@/services/gym-dialog.uts'
@@ -134,17 +130,13 @@
 	if (sessionId != '') activateSession(sessionId)
 	reload()
 	if (session.value != null && sessionId != '' && session.value.id != sessionId) session.value = null
-	// 上次离开时仍有未保存的动作编辑，自动恢复
-	if (session.value != null && session.value.status == 'active' && session.value.editing != null) {
-		sheetOpen.value = true
-	}
 
 	const isFinished = computed(() : boolean => session.value != null && session.value.status == 'finished')
 
 	const kicker = computed(() : string => {
 		if (isFinished.value) return 'WORKOUT SUMMARY'
 		const s = session.value
-		return s != null && s.date == formatDate(new Date()) ? 'TODAY WORKOUT' : 'IN PROGRESS'
+		return s != null && s.date == formatDate(new Date()) ? 'TODAY WORKOUT' : 'UNFINISHED'
 	})
 
 	const dateLabel = computed(() : string => {
@@ -157,8 +149,6 @@
 		if (session.value == null) return { exercises: 0, exercisesWithDone: 0, workDone: 0, warmupDone: 0, unfinished: 0, volume: 0 } as SessionTotals
 		return sessionTotals(session.value)
 	})
-
-	const minutes = computed(() : number => session.value == null ? 0 : durationMinutes(session.value))
 
 	const cards = computed(() : ExerciseCard[] => {
 		const out : ExerciseCard[] = []
@@ -189,10 +179,10 @@
 		const s = session.value
 		if (s == null) return ''
 		if (s.status == 'active') {
-			if (s.cloudStatus == 'synced') return '草稿已同步到云端'
-			if (s.cloudStatus == 'failed') return '草稿保留在本机，云端同步失败'
-			if (s.date != formatDate(new Date())) return '草稿已保存到本机。这场训练开始于' + dateLabel.value + '，日期不会改为今天。'
-			return '草稿已保存到本机'
+			if (s.cloudStatus == 'synced') return '未结束的训练已自动保存到本机，并同步到云端'
+			if (s.cloudStatus == 'failed') return '未结束的训练保留在本机，云端同步失败'
+			if (s.date != formatDate(new Date())) return '这场训练开始于' + dateLabel.value + '，尚未结束，已自动保存到本机。日期不会改为今天。'
+			return '未结束的训练已自动保存到本机'
 		}
 		if (s.cloudStatus == 'synced') return s.durationSent ? '旧版记录已提交；完整信息保留在本机' : '训练记录已同步到云端'
 		if (s.cloudStatus == 'failed') return '云端提交失败，训练记录仍保存在本机，可重试提交。'
@@ -252,8 +242,17 @@
 		if (s == null || busy.value || s.status != 'active') return
 		const t = sessionTotals(s)
 		if (t.workDone + t.warmupDone == 0) {
-			const ok = await confirmDialog('没有完成的组', '还没有完成任何一组，结束后不会产生训练记录，已填写的内容也会被清除。', '结束', '返回继续')
-			if (!ok) return
+			let title = '没有完成的组'
+			let content = '还没有完成任何一组，结束后不会产生训练记录，已填写的内容也会被清除。'
+			if (!sessionHasFilledSets(s)) {
+				// 完全空白：直接清理空草稿，不弹确认
+				title = ''
+				content = ''
+			}
+			if (content != '') {
+				const ok = await confirmDialog(title, content, '结束', '返回继续')
+				if (!ok) return
+			}
 			if (finishSession(s) == 'stale') {
 				uni.showToast({ title: '这场训练状态已变化，请重新进入', icon: 'none' })
 				reload()
@@ -262,13 +261,13 @@
 			uni.switchTab({
 				url: '/pages/home/home',
 				success: () => {
-					uni.showToast({ title: '没有完成的组，未产生训练记录', icon: 'none' })
+					uni.showToast({ title: content == '' ? '空草稿已清理' : '没有完成的组，未产生训练记录', icon: 'none' })
 				}
 			})
 			return
 		}
 		let content = '本次共完成 ' + t.workDone + ' 个正式组。'
-		if (t.unfinished > 0) content = '还有 ' + t.unfinished + ' 个组未完成，结束后不会计入统计，也不会被自动标记为完成。'
+		if (t.unfinished > 0) content = '还有 ' + t.unfinished + ' 个组未完成，结束后只统计已完成的组。'
 		const ok = await confirmDialog('结束本次训练？', content, '结束训练', '返回继续')
 		if (!ok) return
 		busy.value = true

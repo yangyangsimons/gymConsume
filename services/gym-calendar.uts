@@ -310,11 +310,11 @@ export function entryTitle(e : DayEntry) : string {
 		if (!cats.includes(e.exercises[i].category)) cats.push(e.exercises[i].category)
 	}
 	if (cats.length > 0) return cats.join('/') + '训练'
-	return e.status == STATUS_ACTIVE ? '进行中的训练' : '训练'
+	return e.status == STATUS_ACTIVE ? '未结束的训练' : '训练'
 }
 
 export function entryTag(e : DayEntry) : string {
-	if (e.status == STATUS_ACTIVE) return '进行中'
+	if (e.status == STATUS_ACTIVE) return '未结束'
 	if (e.source == SOURCE_LOCAL) {
 		if (e.syncState == 'failed') return '提交失败'
 		if (e.syncState == 'pending') return '待提交'
@@ -325,7 +325,7 @@ export function entryTag(e : DayEntry) : string {
 
 // 数据来源说明：本机记录不能假装已同步云端
 export function entryNote(e : DayEntry) : string {
-	if (e.status == STATUS_ACTIVE) return '尚未结束，不计入训练天数；仅保存在本机'
+	if (e.status == STATUS_ACTIVE) return '训练记录尚未结束，尚未计入统计；仅保存在本机'
 	if (e.source == SOURCE_CLOUD) return '云端记录'
 	if (e.syncState == 'failed') return '提交云端失败，目前仅保存在本机'
 	if (e.syncState == 'pending') return '正在提交云端，暂仅保存在本机'

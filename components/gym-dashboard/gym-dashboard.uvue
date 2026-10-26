@@ -6,22 +6,16 @@
 				<text class="eyebrow">{{ dateLabel }}</text>
 				<text class="heading-1">{{ greeting }}</text>
 			</view>
-			<button class="avatar">YC</button>
+			<button class="avatar" @click="onOpenProfile">{{ avatarText }}</button>
 		</view>
 
 		<view class="hero-card">
 			<view class="hero-decor"></view>
 			<view class="hero-main">
 				<view class="hero-copy">
-					<view class="hero-pill">
-						<gym-icon name="flame-mint" :size="15"></gym-icon>
-						<text class="hero-pill-text">连续训练 {{ streak }} 天</text>
-					</view>
-					<text class="hero-title">本周已训练</text>
+					<text class="hero-eyebrow">本周训练</text>
 					<text class="hero-count"><text class="hero-title-strong">{{ week.trainedDays }}</text> / {{ week.goal }} 天</text>
 					<text class="hero-status">{{ weekStatus }}</text>
-					<text class="hero-sub">本周训练容量 {{ weekVol }} kg</text>
-					<text class="hero-sub hero-sub-accent" v-if="inProgressNote !== ''">{{ inProgressNote }}</text>
 				</view>
 				<view class="progress-ring">
 					<image class="progress-ring-img" :src="ringSrc" mode="aspectFit"></image>
@@ -36,6 +30,20 @@
 				<text class="hero-goal-text">{{ goalLabel }}</text>
 				<text class="hero-goal-action">调整目标</text>
 			</button>
+		</view>
+
+		<view class="draft-card" v-if="draft != null">
+			<view class="draft-top">
+				<text class="draft-title">未结束训练</text>
+				<text class="draft-badge">未计入统计</text>
+			</view>
+			<text class="draft-time">{{ draftTime }}</text>
+			<text class="draft-meta">{{ draftMeta }}</text>
+			<text class="draft-note">这是一场尚未结束的记录，不是正在计时。可以继续填写，或结束并保存。</text>
+			<view class="draft-actions">
+				<button class="draft-btn ghost" @click="onResumeDraft">继续填写</button>
+				<button class="draft-btn solid" @click="onFinishDraft">结束并保存</button>
+			</view>
 		</view>
 
 		<view class="section-block">
@@ -68,7 +76,7 @@
 				</view>
 				<view class="legend-item">
 					<view class="legend-dot legend-active"></view>
-					<text>进行中</text>
+					<text>未结束</text>
 				</view>
 				<view class="legend-item">
 					<view class="legend-ring"></view>
@@ -106,12 +114,8 @@
 						<text class="status-tag" :class="{ 'tag-active': card.active, 'tag-warn': card.warn }">{{ card.tag }}</text>
 					</view>
 					<text class="workout-sub">{{ card.sub }}</text>
-					<view class="meta-row" v-if="card.minutes > 0 || card.exerciseCount > 0">
-						<view class="meta-item" v-if="card.minutes > 0">
-							<gym-icon name="clock-muted" :size="15"></gym-icon>
-							<text>{{ card.active ? '已用 ' : '' }}{{ card.minutes }} 分钟</text>
-						</view>
-						<view class="meta-item" v-if="card.exerciseCount > 0">
+					<view class="meta-row" v-if="card.exerciseCount > 0">
+						<view class="meta-item">
 							<gym-icon name="dumbbell-muted" :size="15"></gym-icon>
 							<text>{{ card.exerciseCount }} 个动作 · {{ card.setCount }} 组</text>
 						</view>
@@ -142,7 +146,8 @@
 <script setup lang="uts">
 	import { Workout, calcStreak, formatDate, parseDate } from '@/services/gym-stats.uts'
 	import { loadWorkouts } from '@/services/gym-api.uts'
-	import { WorkoutSession, loadHistorySessions, loadSession } from '@/services/workout-session.uts'
+	import { loadNickname } from '@/services/gym-nickname.uts'
+	import { WorkoutSession, SessionTotals, loadHistorySessions, loadSession, sessionHasFilledSets, sessionTotals } from '@/services/workout-session.uts'
 	import { PLAN_CONFLICT, PLAN_CONTINUE, StartPlan, planStart } from '@/services/workout-entry.uts'
 	import {
 		CalendarCell, DayEntry, MonthRef, STATUS_ACTIVE, WeekProgress, activeDates, buildDayEntries, buildMonthCells,
@@ -164,12 +169,11 @@
 		warn : boolean
 		sub : string
 		note : string
-		minutes : number
 		exerciseCount : number
 		setCount : number
 	}
 
-	const emit = defineEmits(['start', 'resume'])
+	const emit = defineEmits(['start', 'resume', 'finish-draft'])
 
 	const weekDays = ref<string[]>(['一', '二', '三', '四', '五', '六', '日'])
 	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
@@ -192,6 +196,16 @@
 	const monthOffset = ref<number>(0)
 	const goalCfg = ref<WeeklyGoalConfig>(loadGoalConfig())
 	const showGoal = ref<boolean>(false)
+	const nickname = ref<string>('')
+	const avatarText = computed(() : string => nickname.value == '' ? '?' : Array.from(nickname.value)[0])
+
+	function onOpenProfile() {
+		uni.switchTab({ url: '/pages/profile/profile' })
+	}
+
+	function refreshNickname() {
+		nickname.value = loadNickname()
+	}
 
 	function shortDate(date : string) : string {
 		const d = parseDate(date)
@@ -205,12 +219,6 @@
 	const entries = computed(() : DayEntry[] => buildDayEntries(workouts.value, sessions.value, cloudState.value == 'ok'))
 	const trained = computed(() : Map<string, number> => trainedDaysMap(entries.value))
 	const activeDays = computed(() : string[] => activeDates(entries.value))
-	const activeEntry = computed(() : DayEntry | null => {
-		for (let i = 0; i < entries.value.length; i++) {
-			if (entries.value[i].status == STATUS_ACTIVE) return entries.value[i]
-		}
-		return null
-	})
 
 	const dateLabel = computed(() : string => longDate(todayStr.value))
 
@@ -245,11 +253,53 @@
 	})
 	const goalLabel = computed(() : string => '目标：每周 ' + goalInfo.value.goal + ' 天' + (goalInfo.value.known ? '' : '（默认）'))
 	const pendingNote = computed(() : string => pendingGoal.value > 0 ? nextWeekLabel.value + '起目标改为每周 ' + pendingGoal.value + ' 天' : '')
-	const inProgressNote = computed(() : string => {
-		const e = activeEntry.value
-		if (e == null || e.exercises.length == 0) return ''
-		return '另有一场进行中的训练，结束后才计入本周'
+
+	// ---- 未结束的训练 ----
+	// 不会自动打开，只在首页卡片里展示
+	// 未结束训练卡片：只挑“有填写内容”的草稿，完全空白的草稿不占位置（开始新训练时会被清理）
+	const draft = computed(() : WorkoutSession | null => {
+		const cur = currentSession.value
+		let best : WorkoutSession | null = null
+		if (cur != null && cur.status == STATUS_ACTIVE && sessionHasFilledSets(cur)) best = cur
+		for (let i = 0; i < historySessions.value.length; i++) {
+			const s = historySessions.value[i]
+			if (s.status != STATUS_ACTIVE || !sessionHasFilledSets(s)) continue
+			if (best == null || s.startedAt > best.startedAt) best = s
+		}
+		return best
 	})
+
+	const draftTotals = computed(() : SessionTotals => {
+		const s = draft.value
+		if (s == null) return { exercises: 0, exercisesWithDone: 0, workDone: 0, warmupDone: 0, unfinished: 0, volume: 0 } as SessionTotals
+		return sessionTotals(s)
+	})
+
+	const draftTime = computed(() : string => {
+		const s = draft.value
+		if (s == null) return ''
+		const d = new Date(s.startedAt)
+		const hh = d.getHours()
+		const mm = d.getMinutes()
+		return shortDate(s.date) + ' ' + (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + ' 开始'
+	})
+
+	const draftMeta = computed(() : string => {
+		const t = draftTotals.value
+		return '已完成 ' + t.exercisesWithDone + ' 个动作 · ' + t.workDone + ' 个正式组'
+	})
+
+	function onResumeDraft() {
+		const s = draft.value
+		if (s == null) return
+		emit('resume', s.id)
+	}
+
+	function onFinishDraft() {
+		const s = draft.value
+		if (s == null) return
+		emit('finish-draft', s.id)
+	}
 
 	// ---- 日历 ----
 	const viewMonth = computed(() : MonthRef => {
@@ -294,13 +344,20 @@
 		if (isToday.value) return '今天还没有训练记录'
 		return selectedDate.value > todayStr.value ? '这一天还没到' : '这一天没有训练记录'
 	})
-	const emptySub = computed(() : string => isToday.value && !hasActive.value ? '点击下方按钮开始今天的训练' : '')
+	const emptySub = computed(() : string => {
+		const d = draft.value
+		if (d != null && d.date == todayStr.value && isToday.value) return '未结束的训练显示在上方卡片中'
+		if (isToday.value && !hasActive.value) return '点击下方按钮开始今天的训练'
+		return ''
+	})
 
 	const dayCards = computed(() : DayCard[] => {
 		const list = entriesOnDate(entries.value, selectedDate.value)
 		const out : DayCard[] = []
 		for (let i = 0; i < list.length; i++) {
 			const e = list[i]
+			// 未结束的训练统一显示在顶部“未结束训练”卡片里，这里不再重复
+			if (e.status == STATUS_ACTIVE) continue
 			const names : string[] = []
 			let sets = 0
 			for (let j = 0; j < e.exercises.length; j++) {
@@ -318,7 +375,6 @@
 				warn: tag == '提交失败' || tag == '待提交' || tag == '仅热身',
 				sub: names.length > 0 ? names.join(' · ') : '还没有已完成的动作',
 				note: entryNote(e),
-				minutes: e.durationMin,
 				exerciseCount: e.exercises.length,
 				setCount: e.workSets > 0 ? e.workSets : sets
 			} as DayCard)
@@ -349,8 +405,8 @@
 	}
 
 	function openCard(card : DayCard) {
-		if (card.active) {
-			// 明确指向这张卡片对应的未结束训练
+		// 本机训练（未结束 / 待提交 / 提交失败）进入训练页，可继续填写或重试同步
+		if (card.sessionId != '' && (card.active || card.tag == '提交失败' || card.tag == '待提交')) {
 			emit('resume', card.sessionId)
 			return
 		}
@@ -394,18 +450,22 @@
 	function onSaved() {
 		refreshLocal()
 		refreshCloud()
+		refreshNickname()
 	}
 
 	onMounted(() => {
 		refreshLocal()
 		refreshCloud()
+		refreshNickname()
 		uni.$on('workout-saved', onSaved)
 		uni.$on('workout-session-changed', refreshLocal)
+		uni.$on('cloud-sync-changed', refreshNickname)
 	})
 
 	onUnmounted(() => {
 		uni.$off('workout-saved', onSaved)
 		uni.$off('workout-session-changed', refreshLocal)
+		uni.$off('cloud-sync-changed', refreshNickname)
 	})
 </script>
 
@@ -441,12 +501,16 @@
 	.avatar {
 		width: 43px;
 		height: 43px;
+		padding: 0;
 		border-width: 0;
 		border-radius: 50%;
 		color: #f5fff9;
 		background-color: #1d3328;
-		font-size: 12px;
+		font-size: 18px;
 		font-weight: 700;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.hero-card {
@@ -483,60 +547,34 @@
 		flex: 1;
 	}
 
-	.hero-pill {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		align-self: flex-start;
-		padding: 6px 9px;
-		border-radius: 10px;
-		background-color: #ffffff20;
-	}
-
-	.hero-pill-text {
-		margin-left: 5px;
-		color: #c9f6df;
+	.hero-eyebrow {
+		display: block;
+		color: #98c5af;
 		font-size: 11px;
-		font-weight: 600;
-	}
-
-	.hero-title {
-		margin-top: 14px;
-		color: #d8efe3;
-		font-size: 15px;
-		line-height: 1.4;
-		font-weight: 500;
+		font-weight: 700;
+		margin-bottom: 8px;
 	}
 
 	.hero-count {
 		display: block;
 		color: #ffffff;
-		font-size: 20px;
-		line-height: 1.3;
+		font-size: 24px;
+		line-height: 1.2;
 		font-weight: 500;
 	}
 
 	.hero-title-strong {
 		color: #70e6ad;
-		font-size: 32px;
+		font-size: 40px;
+		font-weight: 700;
 	}
 
 	.hero-status {
-		margin-top: 4px;
-		color: #d8efe3;
-		font-size: 13px;
-		line-height: 1.5;
-	}
-
-	.hero-sub {
+		display: block;
 		margin-top: 6px;
-		color: #bdd3c8;
-		font-size: 11px;
-		line-height: 1.5;
-	}
-
-	.hero-sub-accent {
-		color: #9ff0c8;
+		color: #d8efe3;
+		font-size: 12px;
+		line-height: 1.4;
 	}
 
 	.hero-pending {
@@ -608,6 +646,96 @@
 		margin-top: 4px;
 		color: #afc9bc;
 		font-size: 11px;
+	}
+
+	.draft-card {
+		margin-top: 14px;
+		padding: 16px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #f0d9b8;
+		border-radius: 20px;
+		background-color: #fffaf2;
+	}
+
+	.draft-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.draft-title {
+		color: #6b4a18;
+		font-size: 16px;
+		font-weight: 700;
+	}
+
+	.draft-badge {
+		padding: 4px 9px;
+		border-radius: 9px;
+		color: #8a5b13;
+		background-color: #fbe6c8;
+		font-size: 11px;
+		font-weight: 600;
+	}
+
+	.draft-time {
+		display: block;
+		margin-top: 8px;
+		color: #4f5a53;
+		font-size: 14px;
+		font-weight: 600;
+	}
+
+	.draft-meta {
+		display: block;
+		margin-top: 4px;
+		color: #7d6647;
+		font-size: 13px;
+	}
+
+	.draft-note {
+		display: block;
+		margin-top: 8px;
+		color: #94836a;
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	.draft-actions {
+		display: flex;
+		flex-direction: row;
+		margin-top: 12px;
+	}
+
+	.draft-btn {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		height: 42px;
+		margin: 0;
+		padding: 0;
+		border-radius: 12px;
+		font-size: 15px;
+		font-weight: 600;
+		line-height: 1.4;
+	}
+
+	.draft-btn.ghost {
+		margin-right: 10px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #d9b982;
+		color: #8a5b13;
+		background-color: transparent;
+	}
+
+	.draft-btn.solid {
+		border-width: 0;
+		color: #ffffff;
+		background-color: #c98a2a;
 	}
 
 	.section-block {

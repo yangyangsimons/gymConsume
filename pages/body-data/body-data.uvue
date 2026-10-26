@@ -1,0 +1,284 @@
+<template>
+	<view class="app-shell">
+		<scroll-view class="app-content" scroll-y="true">
+			<view class="page-header">
+				<text class="eyebrow">身体数据</text>
+				<text class="heading-1">记录你的身体变化</text>
+				<text class="sub">每次训练后可更新，支持同步云端</text>
+			</view>
+
+			<view class="form-group">
+				<text class="group-title">基本信息</text>
+				<view class="form-row">
+					<view class="form-item">
+						<text class="form-label">身高 (cm)</text>
+						<input class="form-input" type="digit" v-model="height" placeholder="0" />
+					</view>
+					<view class="form-item">
+						<text class="form-label">体重 (kg)</text>
+						<input class="form-input" type="digit" v-model="weight" placeholder="0" />
+					</view>
+				</view>
+				<view class="form-row no-border">
+					<view class="form-item">
+						<text class="form-label">体脂率 (%)</text>
+						<input class="form-input" type="digit" v-model="bodyFat" placeholder="0" />
+					</view>
+					<view class="form-item">
+						<text class="form-label">记录日期</text>
+						<picker mode="date" :value="date" :start="'2020-01-01'" @change="onDateChange">
+							<view class="form-input readonly">{{ date }}</view>
+						</picker>
+					</view>
+				</view>
+			</view>
+
+			<view class="form-group">
+				<text class="group-title">围度数据 (cm)</text>
+				<view class="form-row">
+					<view class="form-item">
+						<text class="form-label">胸围</text>
+						<input class="form-input" type="digit" v-model="chest" placeholder="0" />
+					</view>
+					<view class="form-item">
+						<text class="form-label">腰围</text>
+						<input class="form-input" type="digit" v-model="waist" placeholder="0" />
+					</view>
+				</view>
+				<view class="form-row">
+					<view class="form-item">
+						<text class="form-label">臂围</text>
+						<input class="form-input" type="digit" v-model="arm" placeholder="0" />
+					</view>
+					<view class="form-item">
+						<text class="form-label">臀围</text>
+						<input class="form-input" type="digit" v-model="hip" placeholder="0" />
+					</view>
+				</view>
+				<view class="form-row no-border">
+					<view class="form-item full">
+						<text class="form-label">大腿围</text>
+						<input class="form-input" type="digit" v-model="thigh" placeholder="0" />
+					</view>
+				</view>
+			</view>
+
+			<view class="form-group">
+				<text class="group-title">备注</text>
+				<view class="form-row no-border">
+					<textarea class="form-textarea" v-model="note" placeholder="记录一下你的感受或目标…" :maxlength="200" />
+				</view>
+			</view>
+
+			<button class="save-btn" @click="onSave">保存记录</button>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { formatDate } from '@/services/gym-stats.uts'
+	import { loadBodyData, saveBodyData, BodyRecord } from '@/services/body-data.uts'
+
+	const date = ref(formatDate(new Date()))
+	const height = ref('')
+	const weight = ref('')
+	const bodyFat = ref('')
+	const chest = ref('')
+	const waist = ref('')
+	const arm = ref('')
+	const hip = ref('')
+	const thigh = ref('')
+	const note = ref('')
+
+	function onDateChange(e : UTSJSONObject) {
+		date.value = e.detail.value as string
+	}
+
+	function parseNum(s : string) : number | null {
+		if (s == null || s == '') return null
+		const n = parseFloat(s)
+		return isNaN(n) ? null : n
+	}
+
+	function loadExisting() {
+		const existing = loadBodyData()
+		if (existing != null) {
+			date.value = existing.date
+			height.value = existing.metrics.height != null ? '' + existing.metrics.height! : ''
+			weight.value = existing.metrics.weight != null ? '' + existing.metrics.weight! : ''
+			bodyFat.value = existing.metrics.bodyFat != null ? '' + existing.metrics.bodyFat! : ''
+			chest.value = existing.metrics.chest != null ? '' + existing.metrics.chest! : ''
+			waist.value = existing.metrics.waist != null ? '' + existing.metrics.waist! : ''
+			arm.value = existing.metrics.arm != null ? '' + existing.metrics.arm! : ''
+			hip.value = existing.metrics.hip != null ? '' + existing.metrics.hip! : ''
+			thigh.value = existing.metrics.thigh != null ? '' + existing.metrics.thigh! : ''
+			note.value = existing.note ?? ''
+		}
+	}
+
+	function onSave() {
+		const metrics = {
+			height: parseNum(height.value),
+			weight: parseNum(weight.value),
+			bodyFat: parseNum(bodyFat.value),
+			chest: parseNum(chest.value),
+			waist: parseNum(waist.value),
+			arm: parseNum(arm.value),
+			hip: parseNum(hip.value),
+			thigh: parseNum(thigh.value)
+		}
+		const hasData = metrics.height != null || metrics.weight != null || metrics.bodyFat != null
+			|| metrics.chest != null || metrics.waist != null || metrics.arm != null
+			|| metrics.hip != null || metrics.thigh != null
+		if (!hasData) {
+			uni.showToast({ title: '请至少填写一项数据', icon: 'none' })
+			return
+		}
+		const record : BodyRecord = {
+			id: 'body-' + Date.now(),
+			date: date.value,
+			metrics: metrics,
+			note: note.value
+		}
+		saveBodyData(record)
+		uni.showToast({ title: '已保存', icon: 'success' })
+		setTimeout(() => {
+			uni.navigateBack()
+		}, 500)
+	}
+
+	onShow(() => {
+		loadExisting()
+	})
+</script>
+
+<style lang="scss">
+	@import "@/uni.scss";
+
+	.app-shell {
+		position: relative;
+		width: 100%;
+		height: 100%;
+		font-family: $gym-font-family;
+		background-color: $gym-bg-page;
+		box-sizing: border-box;
+	}
+
+	.app-content {
+		width: 100%;
+		height: 100%;
+		padding: 0 14px 40px;
+		box-sizing: border-box;
+	}
+
+	.page-header {
+		padding: 16px 2px 24px;
+	}
+
+	.eyebrow {
+		display: block;
+		margin-bottom: 6px;
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.heading-1 {
+		font-size: 25px;
+		color: #222222;
+	}
+
+	.sub {
+		display: block;
+		margin-top: 6px;
+		color: #98a19c;
+		font-size: 11px;
+	}
+
+	.form-group {
+		margin-bottom: 16px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 19px;
+		background-color: #ffffff;
+		overflow: hidden;
+	}
+
+	.group-title {
+		display: block;
+		padding: 14px 15px 0;
+		color: #222222;
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.form-row {
+		display: flex;
+		flex-direction: row;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #edf0ee;
+	}
+
+	.form-row.no-border {
+		border-bottom-width: 0;
+	}
+
+	.form-item {
+		flex: 1;
+		padding: 10px 15px;
+		border-right-width: 1px;
+		border-right-style: solid;
+		border-right-color: #edf0ee;
+	}
+
+	.form-row .form-item:last-child {
+		border-right-width: 0;
+	}
+
+	.form-item.full {
+		flex: 1;
+		border-right-width: 0;
+	}
+
+	.form-label {
+		display: block;
+		margin-bottom: 6px;
+		color: #98a19c;
+		font-size: 10px;
+	}
+
+	.form-input {
+		width: 100%;
+		height: 36px;
+		color: #222222;
+		font-size: 16px;
+		line-height: 36px;
+	}
+
+	.form-input.readonly {
+		color: #222222;
+	}
+
+	.form-textarea {
+		width: 100%;
+		height: 100px;
+		padding-top: 8px;
+		color: #222222;
+		font-size: 14px;
+		line-height: 20px;
+	}
+
+	.save-btn {
+		width: 100%;
+		margin-top: 12px;
+		padding: 14px;
+		border-width: 0;
+		border-radius: 14px;
+		background-color: #22b979;
+		color: #ffffff;
+		font-size: 15px;
+		font-weight: 600;
+	}
+</style>

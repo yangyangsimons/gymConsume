@@ -32,7 +32,7 @@
 					<button class="unit-btn" :class="{ active: unit === 'lbs' }" @click="unit = 'lbs'">lbs</button>
 				</view>
 			</view>
-			<view class="setting-row no-border">
+			<view class="setting-row no-border" @click="onFeatureUnavailable">
 				<view class="setting-icon">
 					<gym-icon name="moon-brand" :size="20"></gym-icon>
 				</view>
@@ -40,7 +40,7 @@
 					<text class="setting-title">深色模式</text>
 					<text class="setting-sub">跟随你的使用习惯</text>
 				</view>
-				<button class="toggle" :class="{ on: dark }" @click="dark = !dark">
+				<button class="toggle" :class="{ on: dark }" @click.stop="onFeatureUnavailable">
 					<view class="toggle-knob"></view>
 				</button>
 			</view>
@@ -48,17 +48,17 @@
 
 		<text class="settings-label">训练与数据</text>
 		<view class="settings-group">
-			<button class="setting-row action">
+			<button class="setting-row action" @click="onOpenExerciseLibrary">
 				<view class="setting-icon">
 					<gym-icon name="dumbbell-brand" :size="20"></gym-icon>
 				</view>
 				<view class="setting-copy">
 					<text class="setting-title">动作库管理</text>
-					<text class="setting-sub">32 个动作 · 3 个自定义</text>
+					<text class="setting-sub">{{ exerciseCount }} 个动作</text>
 				</view>
 				<gym-icon name="chevron-muted-light" :size="18"></gym-icon>
 			</button>
-			<button class="setting-row action">
+			<button class="setting-row action" @click="onOpenBodyData">
 				<view class="setting-icon">
 					<gym-icon name="chart-brand" :size="20"></gym-icon>
 				</view>
@@ -68,7 +68,7 @@
 				</view>
 				<gym-icon name="chevron-muted-light" :size="18"></gym-icon>
 			</button>
-			<button class="setting-row action no-border">
+			<button class="setting-row action no-border" @click="onFeatureUnavailable">
 				<view class="setting-icon">
 					<gym-icon name="download-brand" :size="20"></gym-icon>
 				</view>
@@ -89,9 +89,11 @@
 	import { loadSettings, saveSettings } from '@/services/gym-settings.uts'
 	import { refreshCloudData, retryAllCloud, syncSummary } from '@/services/gym-cloud.uts'
 	import { loadNickname } from '@/services/gym-nickname.uts'
+	import { loadExercises } from '@/services/gym-api.uts'
 	const emit = defineEmits(['edit-nickname'])
 	const nickname = ref(loadNickname())
 	const connecting = ref(false)
+	const exerciseCount = ref(0)
 	const avatarText = computed(() : string => nickname.value == '' ? '?' : Array.from(nickname.value)[0])
 	async function onProfileAction() {
 		if (nickname.value != '') {
@@ -124,6 +126,24 @@
 		syncLabel.value = syncSummary()
 		nickname.value = loadNickname()
 		nextTick(() => { restoring = false })
+		loadExerciseCount()
+	}
+	async function loadExerciseCount() {
+		try {
+			const list = await loadExercises()
+			exerciseCount.value = list.length
+		} catch (e) {
+			console.error('Load exercises failed', e)
+		}
+	}
+	function onFeatureUnavailable() {
+		uni.showToast({ title: '功能开发中，敬请期待', icon: 'none' })
+	}
+	function onOpenExerciseLibrary() {
+		uni.navigateTo({ url: '/pages/exercise-library/exercise-library' })
+	}
+	function onOpenBodyData() {
+		uni.navigateTo({ url: '/pages/body-data/body-data' })
 	}
 	async function retrySync() {
 		try {
@@ -136,6 +156,7 @@
 	onMounted(() => {
 		uni.$on('workout-saved', refreshSettings)
 		uni.$on('cloud-sync-changed', refreshSettings)
+		loadExerciseCount()
 	})
 	onUnmounted(() => {
 		uni.$off('workout-saved', refreshSettings)

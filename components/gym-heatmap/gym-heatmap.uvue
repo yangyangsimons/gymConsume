@@ -106,7 +106,7 @@
 	function showInfo() {
 		const lines : string[] = []
 		for (let i = 0; i < steps.length; i++) lines.push(steps[i].label)
-		infoDialog('热力图说明', '每格是一天，颜色按当天已完成的正式组数分档：' + lines.join(' / ') + '。热身组、未完成组、进行中的训练不计入；同一天多次训练合并。颜色只表示组数多少，不代表训练效果或质量。虚线框是本周尚未到来的日期。')
+		infoDialog('热力图说明', '每格是一天，颜色按当天已完成的正式组数分档：' + lines.join(' / ') + '。热身组、未完成组、未结束的训练不计入；同一天多次训练合并。颜色只表示组数多少，不代表训练效果或质量。虚线框是本周尚未到来的日期。')
 	}
 
 	function openCard(card : DetailCard) {

@@ -1,0 +1,229 @@
+<template>
+	<view class="app-shell">
+		<scroll-view class="app-content" scroll-y="true">
+			<view class="page-header">
+				<text class="eyebrow">动作库</text>
+				<text class="heading-1">全部动作</text>
+				<text class="sub">共 {{ total }} 个动作 · 云端同步</text>
+			</view>
+
+			<view v-if="loading" class="loading">
+				<text class="loading-text">加载中…</text>
+			</view>
+			<view v-else-if="error" class="loading">
+				<text class="error-text">{{ error }}</text>
+				<button class="retry-btn" @click="loadData">重试</button>
+			</view>
+
+			<view v-else>
+				<view v-for="group in grouped" :key="group.category" class="category-group">
+					<text class="category-title">{{ group.category }}</text>
+					<view class="exercise-list">
+						<view v-for="ex in group.items" :key="ex._id" class="exercise-item">
+							<view class="exercise-icon">
+								<text class="icon-text">{{ ex.icon }}</text>
+							</view>
+							<view class="exercise-info">
+								<text class="exercise-name">{{ ex.name }}</text>
+								<text class="exercise-sub">{{ ex.sub }}</text>
+							</view>
+						</view>
+					</view>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { loadExercises } from '@/services/gym-api.uts'
+	import { Exercise } from '@/services/gym-stats.uts'
+
+	const exercises = ref<Exercise[]>([])
+	const loading = ref(true)
+	const error = ref('')
+
+	type Group = { category : string, items : Exercise[] }
+	const grouped = ref<Group[]>([])
+	const total = computed(() : number => exercises.value.length)
+
+	const CATEGORY_ORDER = ['胸', '背', '腿', '肩', '手臂', '核心']
+
+	async function loadData() {
+		loading.value = true
+		error.value = ''
+		try {
+			const list = await loadExercises()
+			exercises.value = list
+			// 按分类分组
+			const map = new Map<string, Exercise[]>()
+			for (let i = 0; i < list.length; i++) {
+				const ex = list[i]
+				const arr = map.get(ex.category) ?? []
+				arr.push(ex)
+				map.set(ex.category, arr)
+			}
+			// 按预定义顺序排列
+			const result : Group[] = []
+			for (let i = 0; i < CATEGORY_ORDER.length; i++) {
+				const cat = CATEGORY_ORDER[i]
+				if (map.has(cat)) result.push({ category: cat, items: map.get(cat)! })
+			}
+			// 处理未在预定义列表中的分类
+			map.forEach((items : Exercise[], cat : string) => {
+				if (CATEGORY_ORDER.indexOf(cat) == -1) result.push({ category: cat, items: items })
+			})
+			grouped.value = result
+		} catch (e) {
+			console.error('Load exercises failed', e)
+			error.value = '加载失败，请检查网络'
+		}
+		loading.value = false
+	}
+
+	onShow(() => {
+		loadData()
+	})
+</script>
+
+<style lang="scss">
+	@import "@/uni.scss";
+
+	.app-shell {
+		position: relative;
+		width: 100%;
+		height: 100%;
+		font-family: $gym-font-family;
+		background-color: $gym-bg-page;
+		box-sizing: border-box;
+	}
+
+	.app-content {
+		width: 100%;
+		height: 100%;
+		padding: 16px 16px 32px;
+		box-sizing: border-box;
+	}
+
+	.page-header {
+		padding: 8px 2px 24px;
+	}
+
+	.eyebrow {
+		display: block;
+		margin-bottom: 6px;
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.heading-1 {
+		font-size: 25px;
+		color: #222222;
+	}
+
+	.sub {
+		display: block;
+		margin-top: 6px;
+		color: #98a19c;
+		font-size: 11px;
+	}
+
+	.loading {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 80px 0;
+	}
+
+	.loading-text {
+		color: #7d8982;
+		font-size: 13px;
+	}
+
+	.error-text {
+		color: #c55c5c;
+		font-size: 13px;
+		margin-bottom: 16px;
+	}
+
+	.retry-btn {
+		padding: 8px 20px;
+		border-width: 0;
+		border-radius: 9px;
+		background-color: #22b979;
+		color: #ffffff;
+		font-size: 12px;
+	}
+
+	.category-group {
+		margin-bottom: 24px;
+	}
+
+		category-title {
+		display: block;
+		margin-bottom: 10px;
+		padding-left: 2px;
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.exercise-list {
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e7ebe8;
+		border-radius: 19px;
+		background-color: #ffffff;
+		overflow: hidden;
+	}
+
+	.exercise-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 14px 15px;
+		border-bottom-width: 1px;
+		border-bottom-style: solid;
+		border-bottom-color: #edf0ee;
+	}
+
+	.exercise-list .exercise-item:last-child {
+		border-bottom-width: 0;
+	}
+
+	.exercise-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 38px;
+		height: 38px;
+		margin-right: 12px;
+		border-radius: 11px;
+		background-color: #ebf7f1;
+	}
+
+	.icon-text {
+		font-size: 14px;
+		font-weight: 600;
+		color: #159b65;
+	}
+
+	.exercise-info {
+		flex: 1;
+	}
+
+	.exercise-name {
+		display: block;
+		margin-bottom: 3px;
+		font-size: 13px;
+		color: #222222;
+	}
+
+	.exercise-sub {
+		display: block;
+		color: #98a19c;
+		font-size: 10px;
+	}
+</style>

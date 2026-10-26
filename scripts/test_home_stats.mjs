@@ -143,7 +143,7 @@ test('周进度：进行中、空训练、仅热身、未完成组都不计入',
 	// 进行中和仅热身的训练会展示，没有任何已完成组的结束训练不展示
 	assert.deepEqual(entries.map((e) => e.key).sort(), ['local:active', 'local:warm'])
 	assert.deepEqual(cal.activeDates(entries), ['2026-10-20'])
-	assert.equal(cal.entryTag(entries.find((e) => e.key === 'local:active')), '进行中')
+	assert.equal(cal.entryTag(entries.find((e) => e.key === 'local:active')), '未结束')
 	assert.equal(cal.entryTag(entries.find((e) => e.key === 'local:warm')), '仅热身')
 })
 

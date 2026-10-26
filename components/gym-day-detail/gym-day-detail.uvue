@@ -24,10 +24,6 @@
 							<text class="dd-stat-value">{{ card.volume }}</text>
 							<text class="dd-stat-label">容量 kg</text>
 						</view>
-						<view class="dd-stat">
-							<text class="dd-stat-value">{{ card.minutes }}</text>
-							<text class="dd-stat-label">{{ card.active ? '已用 分钟' : '用时 分钟' }}</text>
-						</view>
 					</view>
 					<text class="dd-note">{{ card.note }}</text>
 
@@ -72,7 +68,6 @@
 		note : string
 		workSets : number
 		volume : number
-		minutes : number
 		exercises : ExerciseCard[]
 	}
 
@@ -118,7 +113,6 @@
 				note: entryNote(e),
 				workSets: e.workSets,
 				volume: e.volume,
-				minutes: e.durationMin,
 				exercises: exercises
 			} as EntryCard)
 		}

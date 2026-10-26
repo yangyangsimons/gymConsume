@@ -1,0 +1,49 @@
+import { canUseLocal, cloudValue, queueCloud } from './gym-cloud.uts'
+
+export type BodyMetrics = {
+	height ?: number // cm
+	weight ?: number // kg
+	bodyFat ?: number // %
+	chest ?: number // cm
+	waist ?: number // cm
+	arm ?: number // cm
+	hip ?: number // cm
+	thigh ?: number // cm
+}
+
+export type BodyRecord = {
+	id : string
+	date : string // YYYY-MM-DD
+	metrics : BodyMetrics
+	note ?: string
+}
+
+const LOCAL_KEY = 'gymConsume.bodydata.v1'
+const KIND = 'bodydata'
+const RECORD_ID = 'latest'
+
+export function loadBodyData() : BodyRecord | null {
+	const remote = cloudValue(KIND, RECORD_ID)
+	if (remote != null && canUseLocal(KIND, RECORD_ID)) {
+		return remote as BodyRecord
+	}
+	const raw = uni.getStorageSync(LOCAL_KEY)
+	if (raw == '' || raw == null) return null
+	return (typeof raw == 'string' ? JSON.parse(raw) : raw) as BodyRecord
+}
+
+export function saveBodyData(record : BodyRecord) {
+	try {
+		const json = JSON.stringify(record)
+		uni.setStorageSync(LOCAL_KEY, json)
+		queueCloud(KIND, RECORD_ID, json)
+	} catch (e) {
+		console.error('Body data save failed', e)
+		uni.showToast({ title: '保存失败，请重试', icon: 'none' })
+	}
+}
+
+export function formatNum(v : number | null | undefined, unit : string) : string {
+	if (v == null || isNaN(v as number)) return '--'
+	return (Math.round(v * 10) / 10) + unit
+}

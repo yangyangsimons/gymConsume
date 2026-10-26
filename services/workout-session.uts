@@ -327,6 +327,24 @@ export function sessionTotals(session : WorkoutSession) : SessionTotals {
 	return t
 }
 
+// 会话中是否存在已完成的组（正式组或热身组）
+export function sessionHasCompletedSets(s : WorkoutSession) : boolean {
+	const t = sessionTotals(s)
+	return t.workDone + t.warmupDone > 0
+}
+
+// 会话中是否有任何已填写内容（含尚未保存的动作编辑），用于区分“空草稿”
+export function sessionHasFilledSets(s : WorkoutSession) : boolean {
+	if (s.editing != null) return true
+	for (let i = 0; i < s.exercises.length; i++) {
+		const sets = s.exercises[i].sets
+		for (let j = 0; j < sets.length; j++) {
+			if (hasInput(sets[j])) return true
+		}
+	}
+	return false
+}
+
 // 容量只统计已完成的正式组
 export function exerciseVolume(ex : SessionExercise) : number {
 	let v = 0

@@ -13,23 +13,18 @@
 		<text class="load-note" v-else-if="cloudState === 'failed'">云端训练记录加载失败，当前仅显示本机记录。</text>
 
 		<view class="stat-grid">
-			<view class="stat-card first">
-				<text class="stat-label">训练天数</text>
-				<text class="stat-value">{{ overview.days }}<text class="stat-unit"> 天</text></text>
-				<text class="stat-meta">近 90 天</text>
+				<view class="stat-card first">
+					<text class="stat-label">训练天数</text>
+					<text class="stat-value">{{ overview.days }}<text class="stat-unit"> 天</text></text>
+					<text class="stat-meta">近 90 天</text>
+				</view>
+				<view class="stat-card">
+					<text class="stat-label">训练容量</text>
+					<text class="stat-value">{{ volumeText.value }}<text class="stat-unit"> {{ volumeText.unit }}</text></text>
+					<text class="stat-meta positive" v-if="overview.hasPrev">{{ overview.tonsChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(overview.tonsChangePct) }}% 较前 90 天</text>
+					<text class="stat-meta" v-else>近 90 天</text>
+				</view>
 			</view>
-			<view class="stat-card">
-				<text class="stat-label">训练容量</text>
-				<text class="stat-value">{{ volumeText.value }}<text class="stat-unit"> {{ volumeText.unit }}</text></text>
-				<text class="stat-meta positive" v-if="overview.hasPrev">{{ overview.tonsChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(overview.tonsChangePct) }}% 较前 90 天</text>
-				<text class="stat-meta" v-else>近 90 天</text>
-			</view>
-			<view class="stat-card">
-				<text class="stat-label">训练时长</text>
-				<text class="stat-value">{{ durationText.value }}<text class="stat-unit" v-if="durationText.unit !== ''"> {{ durationText.unit }}</text></text>
-				<text class="stat-meta">{{ avgText }}</text>
-			</view>
-		</view>
 
 		<gym-heatmap :entries="entries" :today="today" :demo="demoMode"></gym-heatmap>
 
@@ -75,7 +70,7 @@
 	import { loadExercises, loadWorkouts } from '@/services/gym-api.uts'
 	import { WorkoutSession, loadHistorySessions, loadSession } from '@/services/workout-session.uts'
 	import { DayEntry, buildDayEntries } from '@/services/gym-calendar.uts'
-	import { ExerciseOption, MuscleStats, Overview, ValueUnit, calcMuscleStats, calcOverview, formatDuration, formatVolume } from '@/services/gym-insights.uts'
+	import { ExerciseOption, MuscleStats, Overview, ValueUnit, calcMuscleStats, calcOverview, formatVolume } from '@/services/gym-insights.uts'
 	import { DEMO_MODE, demoExercises, demoSessions } from '@/services/gym-demo.uts'
 
 	type PickerPayload = {
@@ -120,8 +115,6 @@
 	const overview = computed(() : Overview => calcOverview(entries.value, today.value))
 	const muscle = computed(() : MuscleStats => calcMuscleStats(entries.value, today.value))
 	const volumeText = computed(() : ValueUnit => formatVolume(overview.value.volumeKg))
-	const durationText = computed(() : ValueUnit => formatDuration(overview.value.minutes))
-	const avgText = computed(() : string => overview.value.minutes > 0 && overview.value.days > 0 ? '平均 ' + overview.value.avgMinutes + ' 分钟 / 次' : '暂无时长记录')
 
 	function refreshLocal() {
 		today.value = formatDate(new Date())

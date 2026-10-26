@@ -1,12 +1,16 @@
 <template>
 	<view class="app-shell">
-		<gym-dashboard @start="startFlow" @resume="resumeDraft"></gym-dashboard>
+		<gym-dashboard @start="startFlow" @resume="resumeDraft" @finish-draft="finishDraft"></gym-dashboard>
 	</view>
 </template>
 
 <script setup lang="uts">
 	import { formatDate } from '@/services/gym-stats.uts'
-	import { createSession, loadHistorySessions, loadSession } from '@/services/workout-session.uts'
+	import {
+		WorkoutSession, activateSession, clearSession, createSession, finishSession, loadHistorySessions, loadSession,
+		sessionHasCompletedSets, sessionHasFilledSets, sessionTotals
+	} from '@/services/workout-session.uts'
+	import { syncSessionToCloud } from '@/services/workout-adapter.uts'
 	import { PLAN_CONFLICT, PLAN_CONTINUE, PLAN_FAILED_LAST, planStart } from '@/services/workout-entry.uts'
 	import { confirmDialog } from '@/services/gym-dialog.uts'
 
@@ -14,10 +18,118 @@
 		uni.navigateTo({ url: '/pages/workout/workout?id=' + id })
 	}
 
+	function sessionById(id : string) : WorkoutSession | null {
+		const cur = loadSession()
+		if (cur != null && cur.id == id) return cur
+		const hist = loadHistorySessions()
+		for (let i = 0; i < hist.length; i++) {
+			if (hist[i].id == id) return hist[i]
+		}
+		return null
+	}
+
+	// 把指定训练设为当前会话（保持原 ID、开始时间与日期）
+	function ensureCurrent(id : string) : WorkoutSession | null {
+		const cur = loadSession()
+		if (cur != null && cur.id == id) return cur
+		return activateSession(id)
+	}
+
+	function shortDate(date : string) : string {
+		return parseInt(date.substring(5, 7)) + '月' + parseInt(date.substring(8, 10)) + '日'
+	}
+
 	// 开始今天的新训练：日期取点击这一刻的本地时间，与日历选中日期无关
 	function startToday() {
 		const s = createSession(new Date())
 		openWorkout(s.id)
+	}
+
+	// 结束指定训练：本地先保存，再尝试云端；已结束的只重试同步，不会重复生成记录（可安全重试）
+	async function performFinish(id : string) : Promise<string> {
+		const cur = ensureCurrent(id)
+		if (cur == null) return 'missing'
+		if (cur.status == 'finished') {
+			// 已结束的训练只重试同步，不重新生成记录；已同步的直接视为成功
+			if (cur.cloudStatus != 'pending' && cur.cloudStatus != 'failed') return 'saved'
+			try {
+				const status = await syncSessionToCloud(cur)
+				return (status == 'pending' || status == 'failed') ? 'local' : 'saved'
+			} catch (e) {
+				console.error('Finished workout sync failed; local record retained', e)
+				return 'local'
+			}
+		}
+		const result = finishSession(cur)
+		if (result == 'stale') return 'stale'
+		uni.$emit('workout-session-changed')
+		if (result == 'empty') return 'empty'
+		if (cur.cloudStatus == 'pending') {
+			try {
+				const status = await syncSessionToCloud(cur)
+				return (status == 'pending' || status == 'failed') ? 'local' : 'saved'
+			} catch (e) {
+				console.error('Finished workout sync failed; local record retained', e)
+				return 'local'
+			}
+		}
+		return 'saved'
+	}
+
+	function showFinishResult(r : string) {
+		if (r == 'saved') {
+			uni.showToast({ title: '已结束并保存', icon: 'none' })
+			return
+		}
+		if (r == 'local') {
+			uni.showToast({ title: '已保存在本机，云端同步失败，可稍后重试', icon: 'none' })
+			return
+		}
+		if (r == 'empty') {
+			uni.showToast({ title: '没有完成的组，未生成训练记录', icon: 'none' })
+			return
+		}
+		if (r == 'stale') {
+			uni.showToast({ title: '这场训练状态已变化，请重新进入', icon: 'none' })
+			return
+		}
+		uni.showToast({ title: '没有找到这场训练', icon: 'none' })
+		uni.$emit('workout-session-changed')
+	}
+
+	// 首页“结束并保存”：有已完成组则归档；只有填写内容时确认放弃；空草稿直接清理
+	async function finishDraft(id : string) {
+		const s = sessionById(id)
+		if (s == null) {
+			showFinishResult('missing')
+			return
+		}
+		if (s.status == 'finished') {
+			showFinishResult(await performFinish(id))
+			return
+		}
+		if (!sessionHasCompletedSets(s)) {
+			if (!sessionHasFilledSets(s)) {
+				showFinishResult(await performFinish(id))
+				return
+			}
+			const discard = await confirmDialog('结束这份草稿？', '还没有完成任何一组，结束后不会产生训练记录，已填写的组内容会被清除。', '放弃草稿', '返回填写')
+			if (!discard) {
+				openWorkout(id)
+				return
+			}
+			showFinishResult(await performFinish(id))
+			return
+		}
+		const t = sessionTotals(s)
+		let content = '本次已完成 ' + t.workDone + ' 个正式组。'
+		if (t.unfinished > 0) content = '还有 ' + t.unfinished + ' 个组未完成，结束后只统计已完成的组。'
+		const ok = await confirmDialog('结束并保存？', content, '结束并保存', '返回填写')
+		if (!ok) {
+			openWorkout(id)
+			return
+		}
+		showFinishResult(await performFinish(id))
 	}
 
 	// 开始 / 继续训练。日期与草稿状态在点击时重新读取，不依赖页面上已渲染的文案
@@ -44,11 +156,39 @@
 			return
 		}
 		if (plan.kind == PLAN_CONFLICT) {
-			const m = parseInt(plan.date.substring(5, 7))
-			const d = parseInt(plan.date.substring(8, 10))
-			const goOn = await confirmDialog('有未结束的训练', m + '月' + d + '日开始的训练还没有结束。继续它，还是保留它并开始今天的新训练？原训练不会被删除，也不会被计入统计。', '继续原训练', '开始今天的新训练')
-			if (goOn) {
-				openWorkout(plan.sessionId)
+			const old = sessionById(plan.sessionId)
+			if (old == null) {
+				startToday()
+				return
+			}
+			// 空草稿：直接清理，不打扰用户，也不产生统计
+			if (!sessionHasCompletedSets(old) && !sessionHasFilledSets(old)) {
+				const cur = ensureCurrent(old.id)
+				if (cur != null) clearSession()
+				startToday()
+				return
+			}
+			// 只有填写内容、没有完成组：必须明确确认，不能静默覆盖
+			if (!sessionHasCompletedSets(old)) {
+				const discard = await confirmDialog('有未完成的草稿', shortDate(old.date) + ' 开始的一场训练只有填写内容，还没有完成组。放弃它并开始今天的新训练吗？原内容会被清除。', '放弃并开始新的', '返回继续填写')
+				if (!discard) {
+					openWorkout(old.id)
+					return
+				}
+				const cur = ensureCurrent(old.id)
+				if (cur != null) clearSession()
+				startToday()
+				return
+			}
+			// 已有完成组：结束后归档，再开始今天的新训练
+			const finishOld = await confirmDialog('有未结束的训练', shortDate(old.date) + ' 开始的训练还有已完成组，尚未计入统计。要先结束并保存它，再开始今天的新训练吗？', '结束并开始新的', '返回上一场')
+			if (!finishOld) {
+				openWorkout(old.id)
+				return
+			}
+			const r = await performFinish(old.id)
+			if (r == 'stale' || r == 'missing') {
+				showFinishResult(r)
 				return
 			}
 			startToday()
