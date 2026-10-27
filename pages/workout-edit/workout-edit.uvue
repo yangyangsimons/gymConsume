@@ -1,0 +1,553 @@
+<template>
+	<view class="we-page">
+		<scroll-view class="we-scroll" scroll-y="true">
+			<view class="we-content" v-if="slot != null">
+				<view class="we-head">
+					<view class="we-head-top">
+						<view class="we-head-copy">
+							<text class="we-kicker">{{ isMakeup ? 'MAKE-UP RECORD' : 'EDIT RECORD' }}</text>
+							<text class="we-date">{{ dateLabel }}</text>
+						</view>
+						<text class="we-tag">{{ isMakeup ? '补记' : '编辑' }}</text>
+					</view>
+					<text class="we-sub">{{ isMakeup ? '记录补到 ' + slot.session.date + '，保存后计入该日期的统计' : '修改原记录，ID 与训练日期保持不变' }}</text>
+				</view>
+
+				<view class="we-note">
+					<text class="we-note-text">不启动计时，也不影响当前未结束的训练。填写内容会自动保存在草稿里，点击「保存记录」后才写入；未保存前退出，草稿会保留。</text>
+				</view>
+
+				<view class="we-list">
+					<text class="we-empty" v-if="cards.length === 0">还没有添加动作</text>
+					<view class="we-card" v-for="card in cards" :key="card.id">
+						<view class="we-card-top">
+							<view class="we-card-copy">
+								<text class="we-card-name">{{ card.name }}</text>
+								<text class="we-card-target">{{ card.targetLabel }}</text>
+							</view>
+							<text class="we-card-count">{{ card.workDone }}/{{ card.workTarget }}<text class="we-card-count-unit"> 正式组</text></text>
+						</view>
+						<view class="we-bar">
+							<view class="we-bar-fill" :style="{ width: card.pct + '%' }"></view>
+						</view>
+						<view class="we-card-bottom">
+							<text class="we-card-detail">{{ card.detail }}</text>
+							<view class="we-card-actions">
+								<button class="we-link" @click="onEdit(card.index)">编辑</button>
+								<button class="we-link danger" @click="onRemove(card.index)">删除</button>
+							</view>
+						</view>
+					</view>
+				</view>
+
+				<button class="we-add" @click="onAdd">
+					<gym-icon name="plus-brand" :size="18"></gym-icon>
+					<text>添加动作</text>
+				</button>
+				<button class="we-batch" v-if="cards.length > 0" @click="onMarkAll">把已填写的组全部标记为完成</button>
+				<view class="we-pad"></view>
+			</view>
+		</scroll-view>
+
+		<view class="we-footer" v-if="slot != null">
+			<view class="we-footer-row">
+				<button class="we-secondary" @click="onDiscard">放弃</button>
+				<button class="we-primary" :disabled="busy" @click="onSave">{{ busy ? '保存中…' : '保存记录' }}</button>
+			</view>
+			<view class="we-safe"></view>
+		</view>
+
+		<gym-workout-sheet v-if="sheetOpen" :edit-index="editIndex" :edit-slot="true" @close="onSheetClose"
+			@saved="onSheetSaved"></gym-workout-sheet>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { parseDate } from '@/services/gym-stats.uts'
+	import {
+		EditSlot, SessionExercise, beginHistoryEdit, beginMakeupEdit, commitEdit, discardEdit, exerciseProgress, formatTarget,
+		markFilledSetsDone, peekEdit, saveEditSlotSession
+	} from '@/services/workout-session.uts'
+	import { confirmDialog } from '@/services/gym-dialog.uts'
+	import { flushCloud } from '@/services/gym-cloud.uts'
+
+	type ExerciseCard = {
+		index : number
+		id : string
+		name : string
+		targetLabel : string
+		workDone : number
+		workTarget : number
+		pct : number
+		detail : string
+	}
+
+	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
+
+	const slot = ref<EditSlot | null>(null)
+	const isMakeup = ref<boolean>(true)
+	const sheetOpen = ref<boolean>(false)
+	const editIndex = ref<number>(-1)
+	const busy = ref<boolean>(false)
+
+	function reload() {
+		slot.value = peekEdit()
+	}
+
+	function slotLabel(s : EditSlot) : string {
+		return s.mode == 'makeup' ? '补记 ' + s.session.date + ' 的草稿' : '一条编辑草稿'
+	}
+
+	function goBack() {
+		uni.navigateBack({
+			fail: () => {
+				// 页面栈只有本页时（例如被重定向进来）返回首页，避免保存后卡住
+				uni.reLaunch({ url: '/pages/home/home' })
+			}
+		})
+	}
+
+	onLoad((options : OnLoadOptions) => {
+		const opts = options as any
+		const mode = ((opts['mode'] ?? '') as string)
+		const date = ((opts['date'] ?? '') as string)
+		const id = ((opts['id'] ?? '') as string)
+
+		const existing = peekEdit()
+		const matches = existing != null &&
+			((mode == 'makeup' && existing.mode == 'makeup' && existing.session.date == date) ||
+				(mode == 'edit' && existing.mode == 'edit' && existing.session.id == id))
+		if (existing != null && !matches) {
+			// 有另一份未保存草稿：选择继续它，或放弃后开始新草稿
+			uni.showModal({
+				title: '有未保存的草稿',
+				content: '已存在' + slotLabel(existing) + '。可以继续它，或放弃后开始新的。',
+				confirmText: '继续该草稿',
+				cancelText: '放弃并开始',
+				success: (res : ShowModalSuccess) => {
+					if (res.confirm) {
+						slot.value = existing
+						isMakeup.value = existing.mode == 'makeup'
+					} else {
+						discardEdit()
+						openFresh(mode, date, id)
+					}
+				},
+				fail: () => goBack()
+			})
+			return
+		}
+		openFresh(mode, date, id)
+	})
+
+	function openFresh(mode : string, date : string, id : string) {
+		let opened : EditSlot | null = null
+		if (mode == 'makeup') {
+			opened = beginMakeupEdit(date)
+			if (opened == null && peekEdit() == null) {
+				uni.showToast({ title: '只能补记今天或过去的日期', icon: 'none' })
+				setTimeout(() => goBack(), 600)
+				return
+			}
+		} else if (mode == 'edit') {
+			opened = beginHistoryEdit(id)
+			if (opened == null && peekEdit() == null) {
+				uni.showToast({ title: '记录不存在或尚未结束，无法编辑', icon: 'none' })
+				setTimeout(() => goBack(), 600)
+				return
+			}
+		}
+		if (opened == null) {
+			goBack()
+			return
+		}
+		isMakeup.value = opened.mode == 'makeup'
+		slot.value = opened
+	}
+
+	const dateLabel = computed(() : string => {
+		const s = slot.value
+		if (s == null) return ''
+		const d = parseDate(s.session.date)
+		return (d.getMonth() + 1) + '月' + d.getDate() + '日 · 星期' + weekNames[d.getDay()]
+	})
+
+	const cards = computed(() : ExerciseCard[] => {
+		const out : ExerciseCard[] = []
+		const s = slot.value
+		if (s == null) return out
+		for (let i = 0; i < s.session.exercises.length; i++) {
+			const ex = s.session.exercises[i]
+			const p = exerciseProgress(ex)
+			const parts : string[] = []
+			if (p.warmupTotal > 0) parts.push('热身 ' + p.warmupDone + '/' + p.warmupTotal)
+			if (p.unfinished > 0) parts.push(p.unfinished + ' 组未完成')
+			out.push({
+				index: i,
+				id: ex.id,
+				name: ex.name,
+				targetLabel: formatTarget(ex.target),
+				workDone: p.workDone,
+				workTarget: p.workTarget,
+				pct: p.workTarget > 0 ? Math.min(100, Math.round(p.workDone / p.workTarget * 100)) : 0,
+				detail: parts.length > 0 ? parts.join(' · ') : '全部组已完成'
+			} as ExerciseCard)
+		}
+		return out
+	})
+
+	function onAdd() {
+		editIndex.value = -1
+		sheetOpen.value = true
+	}
+
+	function onEdit(index : number) {
+		editIndex.value = index
+		sheetOpen.value = true
+	}
+
+	async function onRemove(index : number) {
+		const s = slot.value
+		if (s == null || index < 0 || index >= s.session.exercises.length) return
+		const ex = s.session.exercises[index]
+		const ok = await confirmDialog('删除动作', '将移除“' + ex.name + '”及其所有组记录，保存后生效。', '删除', '取消')
+		if (!ok) return
+		s.session.exercises.splice(index, 1)
+		if (!saveEditSlotSession(s.session)) uni.showToast({ title: '本机保存失败，请重试', icon: 'none' })
+		reload()
+	}
+
+	function onMarkAll() {
+		const s = slot.value
+		if (s == null) return
+		const n = markFilledSetsDone(s.session)
+		if (n == 0) {
+			uni.showToast({ title: '没有可标记的组：需先填写重量和次数', icon: 'none' })
+			return
+		}
+		saveEditSlotSession(s.session)
+		reload()
+		uni.showToast({ title: '已标记 ' + n + ' 组为完成', icon: 'none' })
+	}
+
+	function onSheetClose() {
+		sheetOpen.value = false
+		reload()
+	}
+
+	function onSheetSaved() {
+		sheetOpen.value = false
+		reload()
+	}
+
+	async function onSave() {
+		const s = slot.value
+		if (s == null || busy.value) return
+		busy.value = true
+		const result = commitEdit(s)
+		if (result == 'empty') {
+			busy.value = false
+			uni.showToast({ title: '没有已完成的组，保存后不会生成记录', icon: 'none' })
+			return
+		}
+		if (result == 'stale') {
+			busy.value = false
+			uni.showToast({ title: '原记录已变化或保存失败，请重试', icon: 'none' })
+			return
+		}
+		try {
+			await flushCloud()
+			uni.showToast({ title: '已保存', icon: 'none' })
+		} catch (e) {
+			console.error('Record saved locally; cloud retry required', e)
+			uni.showToast({ title: '已保存到本机，云端同步待重试', icon: 'none' })
+		}
+		goBack()
+	}
+
+	async function onDiscard() {
+		const s = slot.value
+		if (s == null) return
+		const content = s.mode == 'makeup' ? '已填写的内容将被丢弃，不会生成记录。' : '修改内容将被丢弃，原记录保持不变。'
+		const ok = await confirmDialog('放弃草稿？', content, '放弃', '继续编辑')
+		if (!ok) return
+		discardEdit()
+		goBack()
+	}
+</script>
+
+<style lang="scss">
+	.we-page {
+		display: flex;
+		flex-direction: column;
+		width: 100%;
+		height: 100%;
+		background-color: #f6f8f6;
+		font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+	}
+
+	.we-scroll {
+		flex: 1;
+		height: 0;
+	}
+
+	.we-content {
+		padding: 14px 14px 0;
+	}
+
+	.we-head {
+		padding: 18px;
+		border-radius: 22px;
+		background-color: #1f4433;
+	}
+
+	.we-head-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.we-head-copy {
+		flex: 1;
+		margin-right: 10px;
+	}
+
+	.we-kicker {
+		display: block;
+		margin-bottom: 6px;
+		color: #9fc4b1;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.we-date {
+		display: block;
+		color: #ffffff;
+		font-size: 22px;
+		font-weight: 600;
+	}
+
+	.we-tag {
+		padding: 5px 11px;
+		border-radius: 10px;
+		color: #1f4433;
+		background-color: #70e6ad;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.we-sub {
+		display: block;
+		margin-top: 12px;
+		color: #bdd3c8;
+		font-size: 14px;
+	}
+
+	.we-note {
+		margin-top: 12px;
+		padding: 10px 12px;
+		border-radius: 12px;
+		background-color: #edf2ef;
+	}
+
+	.we-note-text {
+		display: block;
+		color: #637168;
+		font-size: 12px;
+		line-height: 1.6;
+	}
+
+	.we-list {
+		margin-top: 16px;
+	}
+
+	.we-empty {
+		display: block;
+		padding: 28px 0;
+		color: #949d98;
+		font-size: 14px;
+		text-align: center;
+	}
+
+	.we-card {
+		margin-bottom: 12px;
+		padding: 16px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e9edea;
+		border-radius: 18px;
+		background-color: #ffffff;
+	}
+
+	.we-card-top {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.we-card-copy {
+		flex: 1;
+		margin-right: 12px;
+	}
+
+	.we-card-name {
+		display: block;
+		color: #1f2a24;
+		font-size: 17px;
+		font-weight: 700;
+		line-height: 1.35;
+	}
+
+	.we-card-target {
+		display: block;
+		margin-top: 4px;
+		color: #7d8982;
+		font-size: 12px;
+	}
+
+	.we-card-count {
+		color: #159b65;
+		font-size: 22px;
+		font-weight: 700;
+		white-space: nowrap;
+	}
+
+	.we-card-count-unit {
+		color: #7d8982;
+		font-size: 11px;
+		font-weight: 400;
+	}
+
+	.we-bar {
+		height: 6px;
+		margin: 12px 0 10px;
+		border-radius: 3px;
+		background-color: #eaf0ec;
+	}
+
+	.we-bar-fill {
+		height: 6px;
+		border-radius: 3px;
+		background-color: #28b77a;
+	}
+
+	.we-card-bottom {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.we-card-detail {
+		flex: 1;
+		margin-right: 8px;
+		color: #8d9691;
+		font-size: 12px;
+	}
+
+	.we-card-actions {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.we-link {
+		margin: 0;
+		padding: 8px 12px;
+		border-width: 0;
+		color: #25805d;
+		background-color: transparent;
+		font-size: 14px;
+	}
+
+	.we-link.danger {
+		color: #d4493f;
+	}
+
+	.we-add {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		margin-top: 4px;
+		padding: 12px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #c4cec8;
+		border-radius: 14px;
+		color: #348365;
+		background-color: transparent;
+		font-size: 16px;
+	}
+
+	.we-batch {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		margin-top: 10px;
+		padding: 10px;
+		border-width: 0;
+		border-radius: 12px;
+		color: #25805d;
+		background-color: #e6f5ed;
+		font-size: 14px;
+	}
+
+	.we-pad {
+		height: 24px;
+	}
+
+	.we-footer {
+		padding: 10px 14px 10px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #e9edea;
+		background-color: #ffffff;
+	}
+
+	.we-footer-row {
+		display: flex;
+		flex-direction: row;
+	}
+
+	.we-primary {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		height: 48px;
+		margin: 0;
+		padding: 0;
+		border-width: 0;
+		border-radius: 14px;
+		color: #ffffff;
+		background-color: #1db676;
+		font-size: 17px;
+		font-weight: 700;
+		line-height: 1.4;
+	}
+
+	.we-secondary {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 48px;
+		margin: 0 10px 0 0;
+		padding: 0 22px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #d7deda;
+		border-radius: 14px;
+		color: #63716a;
+		background-color: transparent;
+		font-size: 16px;
+		line-height: 1.4;
+	}
+
+	.we-safe {
+		height: env(safe-area-inset-bottom);
+	}
+</style>

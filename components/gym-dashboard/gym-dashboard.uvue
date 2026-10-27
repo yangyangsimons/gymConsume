@@ -126,6 +126,10 @@
 					<gym-icon name="chevron-muted" :size="18"></gym-icon>
 				</view>
 			</view>
+			<button class="makeup-entry" v-if="canMakeup" @click="onMakeup">
+				<gym-icon name="plus-brand" :size="16"></gym-icon>
+				<text>补记 {{ shortDate(selectedDate) }} 的训练</text>
+			</button>
 		</view>
 
 		<text class="start-hint" v-if="startHint !== ''">{{ startHint }}</text>
@@ -402,6 +406,13 @@
 
 	function onStart() {
 		emit('start')
+	}
+
+	// 补记所选日期（今天或过去）的训练；未来日期不提供入口。点击日期本身只浏览，不创建任何记录
+	const canMakeup = computed(() : boolean => selectedDate.value <= todayStr.value)
+
+	function onMakeup() {
+		uni.navigateTo({ url: '/pages/workout-edit/workout-edit?mode=makeup&date=' + selectedDate.value })
 	}
 
 	function openCard(card : DayCard) {
@@ -1086,6 +1097,29 @@
 		font-size: 11px;
 		line-height: 1.5;
 	}
+
+	.makeup-entry {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		margin-top: 2px;
+		padding: 11px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #c4cec8;
+		border-radius: 14px;
+		color: #348365;
+		background-color: transparent;
+		font-size: 14px;
+	}
+
+	/* #ifdef MP-WEIXIN */
+	.makeup-entry::after {
+		border-width: 0;
+	}
+	/* #endif */
 
 	.round-arrow {
 		display: flex;

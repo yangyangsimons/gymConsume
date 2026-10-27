@@ -1,0 +1,6 @@
+=== 运行时只读查询 ===
+环境: cloud1-d0gjxp9f1819c8c1e
+
+--- 0. exercises 集合 vs seed 数据对比 ---
+tcb 执行失败: 
+请确认：已 tcb login + tcb env use cloud1-d0gjxp9f1819c8c1e

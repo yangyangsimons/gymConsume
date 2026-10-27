@@ -1,5 +1,5 @@
-import { Exercise, parseDate, round1 } from './gym-stats.uts'
-import { DayEntry, SOURCE_CLOUD, SetRecord, addDaysStr, weekStartOf } from './gym-calendar.uts'
+import { Exercise, aliasExerciseId, epleyOneRepMax, exerciseCategory, exerciseType, isBodyweight, isValidStatGroup, parseDate, round1 } from './gym-stats.uts'
+import { DayEntry, SOURCE_CLOUD, SOURCE_LOCAL, SetRecord, addDaysStr, weekStartOf } from './gym-calendar.uts'
 import { isWeightRequired } from './workout-session.uts'
 
 // 数据页（热力图 / 动作表现 / 概览 / 部位分布）的统一统计。
@@ -562,4 +562,349 @@ export function clockLabel(at : number) : string {
 	const h = d.getHours()
 	const m = d.getMinutes()
 	return (h < 10 ? '0' + h : '' + h) + ':' + (m < 10 ? '0' + m : '' + m)
+}
+
+// ========================================================================
+// 新统计层：范围 / 1RM / 训练序列 / PR / 概览对比
+// 不改动上面任何已有函数；输入仍走 collectOccurrences + DayEntry
+// ========================================================================
+
+// 范围代号
+export const RANGE_4W = '4w'
+export const RANGE_12W = '12w'
+export const RANGE_6M = '6m'
+export const RANGE_ALL = 'all'
+
+export function rangeDays(range : string) : number {
+	if (range == RANGE_4W) return 28
+	if (range == RANGE_12W) return 84
+	if (range == RANGE_6M) return 183
+	return 0  // all
+}
+
+export function rangeLabel(range : string) : string {
+	if (range == RANGE_4W) return '近 4 周'
+	if (range == RANGE_12W) return '近 12 周'
+	if (range == RANGE_6M) return '近半年'
+	return '全部'
+}
+
+// 计算某个范围的日期边界（周一为一周起点），返回 { cur0, cur1, prev0, prev1, hasPrev }
+// cur0 = 范围起始（含），cur1 = 范围结束（含，即 today）；全部范围 hasPrev=false
+export type RangeBounds = { cur0 : string, cur1 : string, prev0 : string, prev1 : string, hasPrev : boolean }
+
+export function calcRange(today : string, range : string) : RangeBounds {
+	if (range == RANGE_ALL) {
+		return { cur0: '', cur1: today, prev0: '', prev1: '', hasPrev: false } as RangeBounds
+	}
+	const days = rangeDays(range)
+	const cur0 = addDaysStr(today, -(days - 1))
+	const prev1 = addDaysStr(cur0, -1)
+	const prev0 = addDaysStr(prev1, -(days - 1))
+	return { cur0: cur0, cur1: today, prev0: prev0, prev1: prev1, hasPrev: true } as RangeBounds
+}
+
+// ---------------------------------------------------------------- 1RM 与有效组
+// 从 Occurrence 的 sets 中挑出对某动作有效的组。
+// - 跳过 reps=0 或非法 weight 的组；自重允许负/0/正，非自重负 weight 排除
+// - 仅统计正式组（kinds='work'；但 DayEntry.records 已不含热身，此处只需做合法性过滤）
+export function filterValidSets(sets : SetRecord[], bodyweight : boolean) : SetRecord[] {
+	const out : SetRecord[] = []
+	for (let i = 0; i < sets.length; i++) {
+		const s = sets[i]
+		if (!isValidStatGroup(s.weight, s.reps, bodyweight)) continue
+		out.push(s)
+	}
+	return out
+}
+
+// 单组 Epley 1RM 结果：值或 null（无法计算时）
+export function setOneRepMax(s : SetRecord, bodyweight : boolean) : number | null {
+	return epleyOneRepMax(s.weight, s.reps, bodyweight)
+}
+
+// 找一次 Occurrence 里的"最佳组"：优先 1RM 最高；1RM 都 null 时（自重或 reps>12）
+// 取 weight 最大（自重按带符号）；weight 相同再比 reps。
+export type BestSet = { weight : number, reps : number, oneRepMax : number | null, index : number }
+export function pickBestSet(sets : SetRecord[], bodyweight : boolean) : BestSet | null {
+	const valid = filterValidSets(sets, bodyweight)
+	if (valid.length == 0) return null
+	let best : BestSet | null = null
+	for (let i = 0; i < valid.length; i++) {
+		const s = valid[i]
+		const orm = setOneRepMax(s, bodyweight)
+		const cur = { weight: s.weight, reps: s.reps, oneRepMax: orm, index: i } as BestSet
+		if (best == null) { best = cur; continue }
+		if (orm != null && best.oneRepMax != null) {
+			// 两个都有 1RM：只比 1RM，不比 weight/reps
+			if (orm > best.oneRepMax) best = cur
+			continue
+		}
+		if (orm != null && best.oneRepMax == null) { best = cur; continue }  // 我有 1RM 而 best 没有
+		if (orm == null && best.oneRepMax != null) continue                    // 我没有 1RM 而 best 有 → best 胜
+		// 两个都没有 1RM（自重或 reps>12）：按带符号 max weight，weight 相同按 reps
+		if (cur.weight > best.weight) { best = cur; continue }
+		if (cur.weight == best.weight && cur.reps > best.reps) { best = cur; continue }
+	}
+	return best
+}
+
+// 一次 Occurrence 的完整统计
+export type OccurrenceStats = {
+	date : string
+	at : number
+	exerciseId : string
+	name : string
+	category : string
+	isBodyweight : boolean
+	// 有效组数
+	totalSets : number
+	// 最佳组（优先 1RM 最高）
+	bestSet : BestSet | null
+	// 最大 weight（自重按带符号；所有有效组）
+	maxWeight : number
+	// 最大 reps（所有有效组，weight 任意）
+	maxReps : number
+	// 估算 1RM 最大值（自重动作永远 null）
+	maxOneRepMax : number | null
+	// 容量：正的 weight × reps 之和；自重的负 weight 按 0 计
+	volume : number
+	// 数据来源：cloud | local
+	source : string
+}
+
+export function buildOccurrenceStats(o : Occurrence, library : Exercise[]) : OccurrenceStats {
+	const bw = isBodyweight(o.exerciseId, library)
+	const valid = filterValidSets(o.sets, bw)
+	let maxW = -Infinity
+	let maxR = 0
+	let maxOrm : number | null = null
+	let vol = 0
+	for (let i = 0; i < valid.length; i++) {
+		const s = valid[i]
+		if (s.weight > maxW) maxW = s.weight
+		if (s.reps > maxR) maxR = s.reps
+		const orm = setOneRepMax(s, bw)
+		if (orm != null && (maxOrm == null || orm > maxOrm)) maxOrm = orm
+		const add = s.weight > 0 ? s.weight * s.reps : 0  // 负 weight 不计入容量
+		vol += add
+	}
+	const best = pickBestSet(o.sets, bw)
+	const source = o.source == SOURCE_CLOUD ? SOURCE_CLOUD : SOURCE_LOCAL
+	return {
+		date: o.date, at: o.at,
+		exerciseId: aliasExerciseId(o.exerciseId),
+		name: o.name, category: o.category,
+		isBodyweight: bw,
+		totalSets: valid.length,
+		bestSet: best,
+		maxWeight: valid.length > 0 ? maxW : 0,
+		maxReps: maxR,
+		maxOneRepMax: maxOrm,
+		volume: round1(vol),
+		source: source
+	} as OccurrenceStats
+}
+
+// ---------------------------------------------------------------- 训练序列（某动作在时间范围内的每次统计）
+export type TrainingSequence = {
+	exerciseId : string
+	name : string
+	category : string
+	isBodyweight : boolean
+	type : string  // '复合' | '孤立'（库里缺 type 时由 resolveExerciseTypeWithFallback 兜底）
+	sets : OccurrenceStats[]  // 按时间升序
+	count : number
+}
+
+// 兜底规则：库里 type 缺失（''）时，按该动作所有历史组的 reps 中位数判断
+// 中位数 > 12 → '孤立'；否则 → '复合'；无历史数据 → '复合'（默认安全）
+//
+// 调用约束：items 必须是 collectOccurrences 输出的**全量历史**（不过滤 range）。
+//   - 本函数内部会自己做 aliasExerciseId 映射，调用方不用预先处理
+//   - 只统计 reps > 0 的组（reps<=0 排除；不做 filterValidSets——legacy 热身 reps 无法排除）
+//   - 传入 range 过滤后的 items 会导致切换统计范围时 type 发生变化（不允许）
+//
+// 将来 type 影响：训练历史列表的复合/孤立 tag、概览按类型分组对比、
+//   复合动作 1RM PR 高亮、新建训练推荐按 type 筛选
+export function resolveExerciseTypeWithFallback(exerciseId : string, library : Exercise[], items : Occurrence[]) : string {
+	const fromLib = exerciseType(exerciseId, library)
+	if (fromLib == '复合' || fromLib == '孤立') return fromLib
+	// 库里没 type 字段，走历史 reps 中位数
+	const resolved = aliasExerciseId(exerciseId)
+	const allReps : number[] = []
+	for (let i = 0; i < items.length; i++) {
+		const o = items[i]
+		if (aliasExerciseId(o.exerciseId) != resolved) continue
+		const sets = o.sets != null ? o.sets : []
+		for (let j = 0; j < sets.length; j++) {
+			const r = sets[j].reps
+			if (r != null && r > 0) allReps.push(r)
+		}
+	}
+	if (allReps.length == 0) return '复合'  // 无历史，默认复合
+	allReps.sort((a : number, b : number) => a - b)
+	const mid = Math.floor(allReps.length / 2)
+	const median = allReps.length % 2 == 1 ? allReps[mid] : (allReps[mid - 1] + allReps[mid]) / 2
+	return median > 12 ? '孤立' : '复合'
+}
+
+// items 需是 collectOccurrences 返回的已按时间升序数组；range='all' 表示不过滤
+export function buildSequence(items : Occurrence[], exerciseId : string, library : Exercise[], range : string, today : string) : TrainingSequence {
+	const resolved = aliasExerciseId(exerciseId)
+	const bw = isBodyweight(exerciseId, library)
+	const tp = resolveExerciseTypeWithFallback(exerciseId, library, items)
+	const b = calcRange(today, range)
+	const out : OccurrenceStats[] = []
+	for (let i = 0; i < items.length; i++) {
+		const o = items[i]
+		if (aliasExerciseId(o.exerciseId) != resolved) continue
+		if (range != RANGE_ALL) {
+			if (o.date < b.cur0 || o.date > b.cur1) continue
+		} else {
+			if (o.date > today) continue
+		}
+		out.push(buildOccurrenceStats(o, library))
+	}
+	return {
+		exerciseId: resolved,
+		name: out.length > 0 ? out[0].name : '',
+		category: exerciseCategory(exerciseId, library),
+		isBodyweight: bw,
+		type: tp,
+		sets: out,
+		count: out.length
+	} as TrainingSequence
+}
+
+// ---------------------------------------------------------------- PR 识别
+// 每个 occurrence 里：如果本次的 maxOneRepMax / maxWeight /（自重且 weight=0 时的 maxReps）
+// 严格大于之前所有历史最好（不是只范围内），就算一条 PR。
+// 每个动作第一次出现只作为基准，不算 PR。
+export type PRItem = {
+	exerciseId : string
+	name : string
+	date : string
+	source : string
+	prType : string  // 'oneRepMax' | 'maxWeight' | 'maxReps'
+	value : number
+}
+
+export function findPRs(items : Occurrence[], library : Exercise[]) : PRItem[] {
+	const out : PRItem[] = []
+	// 每个动作的历史最好追踪
+	const bestOrm = new Map<string, number>()
+	const bestWt = new Map<string, number>()
+	const bestReps = new Map<string, number>()
+	for (let i = 0; i < items.length; i++) {
+		const o = items[i]
+		const id = aliasExerciseId(o.exerciseId)
+		const bw = isBodyweight(o.exerciseId, library)
+		const stats = buildOccurrenceStats(o, library)
+		const firstTime = !bestOrm.has(id) && !bestWt.has(id)
+
+		// oneRepMax PR（自重不算）
+		if (!bw && stats.maxOneRepMax != null) {
+			const prev = bestOrm.get(id)
+			if (prev == null) bestOrm.set(id, stats.maxOneRepMax!)
+			else if (stats.maxOneRepMax! > prev) {
+				bestOrm.set(id, stats.maxOneRepMax!)
+				out.push({ exerciseId: id, name: o.name, date: o.date, source: o.source, prType: 'oneRepMax', value: stats.maxOneRepMax! } as PRItem)
+			}
+		}
+		// maxWeight PR（自重按带符号严格比较）
+		if (stats.maxWeight > 0 || bw) {  // weight=0 只有自重才参与
+			const prev = bestWt.get(id)
+			if (prev == null) bestWt.set(id, stats.maxWeight)
+			else if (stats.maxWeight > prev) {
+				bestWt.set(id, stats.maxWeight)
+				out.push({ exerciseId: id, name: o.name, date: o.date, source: o.source, prType: 'maxWeight', value: stats.maxWeight } as PRItem)
+			}
+		}
+		// maxReps PR（自重 + weight=0 的组才参与，bodyweight=true）
+		if (bw && stats.maxWeight == 0 && stats.maxReps > 0) {
+			const prev = bestReps.get(id)
+			if (prev == null) bestReps.set(id, stats.maxReps)
+			else if (stats.maxReps > prev) {
+				bestReps.set(id, stats.maxReps)
+				out.push({ exerciseId: id, name: o.name, date: o.date, source: o.source, prType: 'maxReps', value: stats.maxReps } as PRItem)
+			}
+		}
+		// 第一次出现但 stats 全 null/0 的，不更新 map 也不算 PR，等下一次
+		if (firstTime && stats.maxOneRepMax == null && stats.maxWeight == 0 && stats.maxReps == 0) {
+			// 什么都不做：让这个"第一次"保持基准但不被任何指标捕捉
+		}
+	}
+	return out
+}
+
+// ---------------------------------------------------------------- 概览对比
+export type PeriodOverview = {
+	days : number      // 训练次数（按有训练的天数算，不是 DayEntry 数）
+	sessions : number  // DayEntry counted 数（本机按场，legacy 按天；混合粒度）
+	volume : number    // 总容量（kg；自重负 weight 按 0 计）
+	newPRs : number    // 范围内新增 PR 数
+}
+
+export type OverviewCompare = {
+	cur : PeriodOverview
+	prev : PeriodOverview | null  // 上一周期；无则 null
+	hasPrev : boolean
+	daysDelta : number
+	volumeDeltaPct : number
+	prDelta : number
+}
+
+export function buildOverviewCompare(entries : DayEntry[], items : Occurrence[], prs : PRItem[], library : Exercise[], today : string, range : string) : OverviewCompare {
+	const b = calcRange(today, range)
+
+	function aggregate(from : string, to : string) : PeriodOverview {
+		let sessions = 0
+		const dates = new Set<string>()
+		let volume = 0
+		for (let i = 0; i < entries.length; i++) {
+			const e = entries[i]
+			if (!e.counted) continue
+			if (e.date < from || e.date > to) continue
+			sessions++
+			dates.add(e.date)
+			// DayEntry.volume 已排除热身，但自重负 weight 仍可能算在内（entryFromSession 只看 weightRequired，不看 weight 正负）
+			// 这里粗略扣一下：自重动作 volume 只加正的 weight
+			let entryVol = e.volume
+			for (let j = 0; j < e.exercises.length; j++) {
+				const ex = e.exercises[j]
+				const bw = isBodyweight(ex.exerciseId, library)
+				if (bw && ex.records.length > 0) {
+					for (let k = 0; k < ex.records.length; k++) {
+						const s = ex.records[k]
+						if (s.weight < 0) entryVol -= s.weight * s.reps  // 负的加回去变 0
+					}
+				}
+			}
+			volume += round1(entryVol)
+		}
+		let newPRs = 0
+		for (let i = 0; i < prs.length; i++) {
+			if (prs[i].date >= from && prs[i].date <= to) newPRs++
+		}
+		return { days: dates.size, sessions: sessions, volume: round1(volume), newPRs: newPRs } as PeriodOverview
+	}
+
+	const cur = b.hasPrev ? aggregate(b.cur0, b.cur1) : aggregate('0000-00-00', b.cur1)
+	let prev : PeriodOverview | null = null
+	if (b.hasPrev) prev = aggregate(b.prev0, b.prev1)
+
+	const hasPrev = b.hasPrev && prev != null && (prev.sessions > 0 || prev.volume > 0)
+	const daysDelta = hasPrev ? cur.days - prev!.days : 0
+	const volumeDeltaPct = hasPrev && prev!.volume > 0 ? round1((cur.volume - prev!.volume) / prev!.volume * 100) : 0
+	const prDelta = hasPrev ? cur.newPRs - prev!.newPRs : 0
+
+	return {
+		cur: cur,
+		prev: prev,
+		hasPrev: hasPrev,
+		daysDelta: daysDelta,
+		volumeDeltaPct: volumeDeltaPct,
+		prDelta: prDelta
+	} as OverviewCompare
 }

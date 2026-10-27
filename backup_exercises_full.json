@@ -1,0 +1,578 @@
+CloudBase CLI 3.8.9
+试试 tcb ai 命令，开启 AI 原生开发
+- 数据加载中...
+- 正在执行命令...
+[
+  {
+    "_id": "arm-01",
+    "name": "杠铃弯举",
+    "sub": "肱二头肌",
+    "icon": "弯",
+    "category": "手臂",
+    "pinyin": "gangling wanju",
+    "sort": {
+      "$numberInt": "15"
+    }
+  },
+  {
+    "_id": "arm-02",
+    "name": "锤式弯举",
+    "sub": "肱肌 · 前臂",
+    "icon": "锤",
+    "category": "手臂",
+    "pinyin": "chuishi wanju",
+    "sort": {
+      "$numberInt": "16"
+    }
+  },
+  {
+    "_id": "arm-03",
+    "name": "绳索下压",
+    "sub": "肱三头肌",
+    "icon": "压",
+    "category": "手臂",
+    "pinyin": "shengsuo xiaya",
+    "sort": {
+      "$numberInt": "17"
+    }
+  },
+  {
+    "_id": "arm-04",
+    "sort": {
+      "$numberDouble": "51.0"
+    },
+    "sub": "肱二头肌",
+    "category": "手臂",
+    "icon": "弯",
+    "name": "坐姿绳索弯举",
+    "pinyin": "shengsuo wanju"
+  },
+  {
+    "_id": "back-01",
+    "name": "引体向上",
+    "sub": "背阔肌 · 二头肌",
+    "icon": "引",
+    "category": "背",
+    "pinyin": "yintixiangshang",
+    "sort": {
+      "$numberInt": "4"
+    }
+  },
+  {
+    "_id": "back-02",
+    "name": "杠铃划船",
+    "sub": "背阔肌 · 斜方肌",
+    "icon": "划",
+    "category": "背",
+    "pinyin": "gangling huachuan",
+    "sort": {
+      "$numberInt": "5"
+    }
+  },
+  {
+    "_id": "back-03",
+    "name": "高位下拉",
+    "sub": "背阔肌",
+    "icon": "拉",
+    "category": "背",
+    "pinyin": "gaowei xiala",
+    "sort": {
+      "$numberInt": "6"
+    }
+  },
+  {
+    "_id": "back-04",
+    "name": "坐姿划船",
+    "sub": "中背 · 菱形肌",
+    "icon": "坐",
+    "category": "背",
+    "pinyin": "zuozi huachuan",
+    "sort": {
+      "$numberInt": "7"
+    }
+  },
+  {
+    "_id": "back-05",
+    "sub": "背阔肌",
+    "category": "背",
+    "icon": "拉",
+    "name": "正握下拉（宽握）",
+    "pinyin": "zhengwo xiala kuan",
+    "sort": {
+      "$numberDouble": "28.0"
+    }
+  },
+  {
+    "_id": "back-06",
+    "category": "背",
+    "icon": "拉",
+    "name": "反握下拉",
+    "pinyin": "fanwo xiala",
+    "sort": {
+      "$numberDouble": "29.0"
+    },
+    "sub": "中背 · 背阔肌"
+  },
+  {
+    "_id": "back-07",
+    "category": "背",
+    "icon": "划",
+    "name": "坐姿器械划船（中握）",
+    "pinyin": "zuozi qixie huachuan zhong",
+    "sort": {
+      "$numberDouble": "30.0"
+    },
+    "sub": "背阔肌"
+  },
+  {
+    "_id": "back-08",
+    "name": "坐姿划船（宽握）",
+    "pinyin": "zuozi huachuan kuan",
+    "sort": {
+      "$numberDouble": "31.0"
+    },
+    "sub": "背阔肌",
+    "category": "背",
+    "icon": "划"
+  },
+  {
+    "_id": "back-09",
+    "name": "坐姿划船（中握）",
+    "pinyin": "zuozi huachuan zhong",
+    "sort": {
+      "$numberDouble": "32.0"
+    },
+    "sub": "背阔肌",
+    "category": "背",
+    "icon": "划"
+  },
+  {
+    "_id": "back-10",
+    "category": "背",
+    "icon": "划",
+    "name": "坐姿划船（窄握）",
+    "pinyin": "zuozi huachuan zhai",
+    "sort": {
+      "$numberDouble": "33.0"
+    },
+    "sub": "背阔肌"
+  },
+  {
+    "_id": "back-11",
+    "sub": "背阔肌",
+    "category": "背",
+    "icon": "划",
+    "name": "杠铃划船(正握)",
+    "pinyin": "gangling huachuan zheng",
+    "sort": {
+      "$numberDouble": "34.0"
+    }
+  },
+  {
+    "_id": "back-12",
+    "category": "背",
+    "icon": "划",
+    "name": "杠铃划船(反握)",
+    "pinyin": "gangling huachuan fan",
+    "sort": {
+      "$numberDouble": "35.0"
+    },
+    "sub": "背阔肌"
+  },
+  {
+    "_id": "back-13",
+    "pinyin": "shengsuo mianla",
+    "sort": {
+      "$numberDouble": "36.0"
+    },
+    "sub": "背阔肌",
+    "category": "背",
+    "icon": "拉",
+    "name": "绳索面拉"
+  },
+  {
+    "_id": "chest-01",
+    "name": "杠铃卧推",
+    "sub": "胸大肌 · 三头肌",
+    "icon": "卧",
+    "category": "胸",
+    "pinyin": "gangling woutui",
+    "sort": {
+      "$numberInt": "0"
+    }
+  },
+  {
+    "_id": "chest-02",
+    "name": "上斜哑铃卧推",
+    "sub": "上胸 · 三角肌前束",
+    "icon": "斜",
+    "category": "胸",
+    "pinyin": "shangxie yaling woutui",
+    "sort": {
+      "$numberInt": "1"
+    }
+  },
+  {
+    "_id": "chest-03",
+    "name": "绳索夹胸",
+    "sub": "胸大肌",
+    "icon": "夹",
+    "category": "胸",
+    "pinyin": "shengsuo jiaxiong",
+    "sort": {
+      "$numberInt": "2"
+    }
+  },
+  {
+    "_id": "chest-04",
+    "name": "双杠臂屈伸",
+    "sub": "下胸 · 三头肌",
+    "icon": "屈",
+    "category": "胸",
+    "pinyin": "shuanggang biqushen",
+    "sort": {
+      "$numberInt": "3"
+    }
+  },
+  {
+    "_id": "chest-05",
+    "category": "胸",
+    "icon": "推",
+    "name": "上斜卧推",
+    "pinyin": "shangxie woutui",
+    "sort": {
+      "$numberDouble": "20.0"
+    },
+    "sub": "胸大肌"
+  },
+  {
+    "_id": "chest-06",
+    "sort": {
+      "$numberDouble": "21.0"
+    },
+    "sub": "胸大肌",
+    "category": "胸",
+    "icon": "推",
+    "name": "史密斯卧推",
+    "pinyin": "shimisi wotui"
+  },
+  {
+    "_id": "chest-07",
+    "icon": "推",
+    "name": "史密斯上斜卧推",
+    "pinyin": "shimisi shangxie wotui",
+    "sort": {
+      "$numberDouble": "22.0"
+    },
+    "sub": "胸大肌 · 三头肌",
+    "category": "胸"
+  },
+  {
+    "_id": "chest-08",
+    "category": "胸",
+    "icon": "推",
+    "name": "哑铃卧推",
+    "pinyin": "yaling woutui",
+    "sort": {
+      "$numberDouble": "23.0"
+    },
+    "sub": "胸大肌"
+  },
+  {
+    "_id": "chest-09",
+    "category": "胸",
+    "icon": "推",
+    "name": "器械平板卧推",
+    "pinyin": "qixie pingban woutui",
+    "sort": {
+      "$numberDouble": "24.0"
+    },
+    "sub": "胸大肌"
+  },
+  {
+    "_id": "chest-10",
+    "category": "胸",
+    "icon": "推",
+    "name": "器械上斜卧推",
+    "pinyin": "qixie shangxie woutui",
+    "sort": {
+      "$numberDouble": "25.0"
+    },
+    "sub": "上胸"
+  },
+  {
+    "_id": "chest-11",
+    "category": "胸",
+    "icon": "推",
+    "name": "坐姿推胸机",
+    "pinyin": "zuozi tuixiongji",
+    "sort": {
+      "$numberDouble": "26.0"
+    },
+    "sub": "胸大肌"
+  },
+  {
+    "_id": "chest-12",
+    "category": "胸",
+    "icon": "夹",
+    "name": "蝴蝶机夹胸",
+    "pinyin": "hudieji jiaxiong",
+    "sort": {
+      "$numberDouble": "27.0"
+    },
+    "sub": "胸大肌"
+  },
+  {
+    "_id": "core-01",
+    "name": "平板支撑",
+    "sub": "腹横肌 · 核心",
+    "icon": "板",
+    "category": "核心",
+    "pinyin": "pingban zhicheng",
+    "sort": {
+      "$numberInt": "18"
+    }
+  },
+  {
+    "_id": "core-02",
+    "name": "悬垂举腿",
+    "sub": "下腹 · 髂腰肌",
+    "icon": "腿",
+    "category": "核心",
+    "pinyin": "xuanchui jutui",
+    "sort": {
+      "$numberInt": "19"
+    }
+  },
+  {
+    "_id": "legs-01",
+    "name": "杠铃深蹲",
+    "sub": "股四头肌 · 臀大肌",
+    "icon": "蹲",
+    "category": "腿",
+    "pinyin": "gangling shendun",
+    "sort": {
+      "$numberInt": "8"
+    }
+  },
+  {
+    "_id": "legs-02",
+    "name": "罗马尼亚硬拉",
+    "sub": "腘绳肌 · 臀大肌",
+    "icon": "硬",
+    "category": "腿",
+    "pinyin": "luomaniya yingla",
+    "sort": {
+      "$numberInt": "9"
+    }
+  },
+  {
+    "_id": "legs-03",
+    "name": "腿举",
+    "sub": "股四头肌 · 臀大肌",
+    "icon": "举",
+    "category": "腿",
+    "pinyin": "tuiju",
+    "sort": {
+      "$numberInt": "10"
+    }
+  },
+  {
+    "_id": "legs-04",
+    "name": "腿弯举",
+    "sub": "腘绳肌",
+    "icon": "弯",
+    "category": "腿",
+    "pinyin": "tuiwanju",
+    "sort": {
+      "$numberInt": "11"
+    }
+  },
+  {
+    "_id": "legs-05",
+    "icon": "蹲",
+    "name": "史密斯深蹲",
+    "pinyin": "shimisi shendun",
+    "sort": {
+      "$numberDouble": "37.0"
+    },
+    "sub": "股四头肌",
+    "category": "腿"
+  },
+  {
+    "_id": "legs-06",
+    "pinyin": "zuozi qushen",
+    "sort": {
+      "$numberDouble": "38.0"
+    },
+    "sub": "股四头肌",
+    "category": "腿",
+    "icon": "伸",
+    "name": "坐姿腿屈伸"
+  },
+  {
+    "_id": "legs-07",
+    "icon": "推",
+    "name": "坐姿腿推机",
+    "pinyin": "zuozi tuituiji",
+    "sort": {
+      "$numberDouble": "39.0"
+    },
+    "sub": "股四头肌",
+    "category": "腿"
+  },
+  {
+    "_id": "legs-08",
+    "pinyin": "hake shendun",
+    "sort": {
+      "$numberDouble": "40.0"
+    },
+    "sub": "股四头肌",
+    "category": "腿",
+    "icon": "蹲",
+    "name": "哈克深蹲"
+  },
+  {
+    "_id": "legs-09",
+    "category": "腿",
+    "icon": "蹲",
+    "name": "哈克深蹲（反向）",
+    "pinyin": "hake shendun fan",
+    "sort": {
+      "$numberDouble": "41.0"
+    },
+    "sub": "股四头肌"
+  },
+  {
+    "_id": "legs-10",
+    "sort": {
+      "$numberDouble": "42.0"
+    },
+    "sub": "内收肌",
+    "category": "腿",
+    "icon": "外",
+    "name": "髋内收训练机(外展)",
+    "pinyin": "neishouji wai"
+  },
+  {
+    "_id": "legs-11",
+    "sub": "内收肌",
+    "category": "腿",
+    "icon": "内",
+    "name": "髋内收训练机(内收)",
+    "pinyin": "neishouji nei",
+    "sort": {
+      "$numberDouble": "43.0"
+    }
+  },
+  {
+    "_id": "shoulder-01",
+    "name": "杠铃推举",
+    "sub": "三角肌前束 · 三头肌",
+    "icon": "推",
+    "category": "肩",
+    "pinyin": "gangling tuiju",
+    "sort": {
+      "$numberInt": "12"
+    }
+  },
+  {
+    "_id": "shoulder-02",
+    "name": "哑铃侧平举",
+    "sub": "三角肌中束",
+    "icon": "侧",
+    "category": "肩",
+    "pinyin": "yaling cepingju",
+    "sort": {
+      "$numberInt": "13"
+    }
+  },
+  {
+    "_id": "shoulder-03",
+    "name": "面拉",
+    "sub": "三角肌后束",
+    "icon": "面",
+    "category": "肩",
+    "pinyin": "mianla",
+    "sort": {
+      "$numberInt": "14"
+    }
+  },
+  {
+    "_id": "shoulder-04",
+    "category": "肩",
+    "icon": "推",
+    "name": "史密斯推举",
+    "pinyin": "shimisi tuiju",
+    "sort": {
+      "$numberDouble": "44.0"
+    },
+    "sub": "肩"
+  },
+  {
+    "_id": "shoulder-05",
+    "icon": "推",
+    "name": "器械肩上推举（对握）",
+    "pinyin": "qixie jianshang tuiju duiwo",
+    "sort": {
+      "$numberDouble": "45.0"
+    },
+    "sub": "肩",
+    "category": "肩"
+  },
+  {
+    "_id": "shoulder-06",
+    "category": "肩",
+    "icon": "推",
+    "name": "器械肩上推举（正握）",
+    "pinyin": "qixie jianshang tuiju zhengwo",
+    "sort": {
+      "$numberDouble": "46.0"
+    },
+    "sub": "肩"
+  },
+  {
+    "_id": "shoulder-07",
+    "sort": {
+      "$numberDouble": "47.0"
+    },
+    "sub": "肩",
+    "category": "肩",
+    "icon": "推",
+    "name": "哑铃推举",
+    "pinyin": "yaling tuiju"
+  },
+  {
+    "_id": "shoulder-08",
+    "icon": "飞",
+    "name": "哑铃侧平举（反握）",
+    "pinyin": "yaling cepingju fan",
+    "sort": {
+      "$numberDouble": "48.0"
+    },
+    "sub": "肩",
+    "category": "肩"
+  },
+  {
+    "_id": "shoulder-09",
+    "pinyin": "shengsuo cepingju",
+    "sort": {
+      "$numberDouble": "49.0"
+    },
+    "sub": "肩",
+    "category": "肩",
+    "icon": "飞",
+    "name": "绳索侧平举"
+  },
+  {
+    "_id": "shoulder-10",
+    "pinyin": "hudieji fan",
+    "sort": {
+      "$numberDouble": "50.0"
+    },
+    "sub": "肩",
+    "category": "肩",
+    "icon": "飞",
+    "name": "蝴蝶机（反向）"
+  }
+]

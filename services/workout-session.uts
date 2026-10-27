@@ -1,4 +1,4 @@
-import { Exercise, formatDate, round1 } from './gym-stats.uts'
+import { Exercise, formatDate, parseDate, round1 } from './gym-stats.uts'
 import { canUseLocal, cloudRevision, cloudRows, cloudStatus, cloudValue, queueCloud } from './gym-cloud.uts'
 
 // 本机训练会话：所有“目标 / 组类型 / 实际 RIR / 完成状态”仅保存在本机，字段含义见 docs/workout-session-phase1.md
@@ -610,5 +610,188 @@ export function finishSession(s : WorkoutSession) : string {
 	s.editing = null
 	s.cloudStatus = t.workDone > 0 ? 'pending' : 'skipped'
 	saveSession(s)
+	return 'recorded'
+}
+
+// ------------------------------------------------------------ 补记 / 编辑历史记录的“编辑槽”
+// 编辑槽是独立于当前训练的草稿存储：补记历史日期、修改已结束记录都在这里填写，
+// 不启动计时，不占用也不覆盖当前未结束训练；只有 commitEdit 保存后才写入历史并进入云端队列。
+export type EditSlot = {
+	// makeup = 补记所选日期的新记录；edit = 修改已有的已结束记录
+	mode : string
+	session : WorkoutSession
+}
+
+const EDIT_KEY = 'gymConsume.workoutEdit.v1'
+
+function writeEditSlot(slot : EditSlot | null) : boolean {
+	try {
+		if (slot == null) uni.removeStorageSync(EDIT_KEY)
+		else uni.setStorageSync(EDIT_KEY, JSON.stringify(slot))
+		return true
+	} catch (e) {
+		console.error('Edit draft could not be persisted', e)
+		return false
+	}
+}
+
+// 当前编辑槽内容（含未保存草稿），没有时返回 null；只读，不改写任何数据
+export function peekEdit() : EditSlot | null {
+	const raw = readJson(EDIT_KEY)
+	if (raw == null) return null
+	const slot = raw as EditSlot
+	if (slot.session == null || slot.session.version != SESSION_VERSION || slot.session.exercises == null) return null
+	if (slot.mode != 'makeup' && slot.mode != 'edit') return null
+	slot.session = repairSession(slot.session)
+	return slot
+}
+
+// 动作填写弹层复用：editSlot 模式下用这两个函数替代 loadSession / saveSession。
+// 只写本机草稿，不进入云端队列；提交云端发生在 commitEdit。
+export function loadEditSlotSession() : WorkoutSession | null {
+	const slot = peekEdit()
+	return slot == null ? null : slot.session
+}
+
+export function saveEditSlotSession(s : WorkoutSession) : boolean {
+	const slot = peekEdit()
+	if (slot == null || slot.session.id != s.id) return false
+	s.updatedAt = Date.now()
+	slot.session = s
+	return writeEditSlot(slot)
+}
+
+function isValidDate(date : string) : boolean {
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
+	return formatDate(parseDate(date)) == date
+}
+
+// 已结束记录（当前会话位或本机历史）；未结束的训练不能通过编辑入口修改
+function findFinishedById(id : string) : WorkoutSession | null {
+	const cur = loadSession()
+	if (cur != null && cur.id == id) return cur.status == 'finished' ? cur : null
+	const list = readHistory()
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id == id) return list[i].status == 'finished' ? list[i] : null
+	}
+	return null
+}
+
+// 开始补记某一天。日期必须是合法的用户本地自然日且不能是未来；同一天可补记多场（各自独立 ID）。
+// 已有同日期补记草稿时直接继续它；存在其他未保存草稿时返回 null，由调用方提示后选择。
+export function beginMakeupEdit(date : string) : EditSlot | null {
+	if (!isValidDate(date)) return null
+	if (date > formatDate(new Date())) return null
+	const existing = peekEdit()
+	if (existing != null) {
+		if (existing.mode == 'makeup' && existing.session.date == date) return existing
+		return null
+	}
+	const t = Date.now()
+	const s = {
+		version: SESSION_VERSION,
+		id: genId('ws'),
+		date: date,
+		startedAt: t,
+		updatedAt: t,
+		finishedAt: 0,
+		status: 'active',
+		exercises: [] as SessionExercise[],
+		editing: null,
+		cloudStatus: 'none',
+		durationSent: false
+	} as WorkoutSession
+	const slot = { mode: 'makeup', session: s } as EditSlot
+	if (!writeEditSlot(slot)) {
+		uni.showToast({ title: '草稿保存失败，请重试', icon: 'none' })
+		return null
+	}
+	return slot
+}
+
+// 开始编辑一条已结束的历史记录：拷贝进编辑槽，ID / 日期 / 开始时间保持不变。
+export function beginHistoryEdit(id : string) : EditSlot | null {
+	const existing = peekEdit()
+	if (existing != null) {
+		if (existing.mode == 'edit' && existing.session.id == id) return existing
+		return null
+	}
+	const target = findFinishedById(id)
+	if (target == null) return null
+	const copy = JSON.parse(JSON.stringify(target)) as WorkoutSession
+	const slot = { mode: 'edit', session: copy } as EditSlot
+	if (!writeEditSlot(slot)) {
+		uni.showToast({ title: '草稿保存失败，请重试', icon: 'none' })
+		return null
+	}
+	return slot
+}
+
+// 放弃编辑槽草稿：补记内容被丢弃；编辑场景下原记录保持不变
+export function discardEdit() {
+	writeEditSlot(null)
+}
+
+// 批量把“已填写且数据合法”的组标记为完成，返回新标记的组数；空组与不合法组不碰
+export function markFilledSetsDone(s : WorkoutSession) : number {
+	let n = 0
+	for (let i = 0; i < s.exercises.length; i++) {
+		const ex = s.exercises[i]
+		for (let j = 0; j < ex.sets.length; j++) {
+			const set = ex.sets[j]
+			if (set.done || !hasInput(set)) continue
+			if (validateSet(set, ex.weightRequired) != '') continue
+			set.done = true
+			n++
+		}
+	}
+	return n
+}
+
+// 保存编辑槽为一条已结束的历史记录。
+// - 补记：生成新记录，归属日期为所选日期，创建 / 修改时间是真实保存时间；
+// - 编辑：按原 ID 覆写，日期与开始时间以原记录为准（云端身份校验要求），不产生重复记录，重试安全。
+// 返回 'recorded' | 'empty'（没有任何已完成组，不生成记录，草稿保留）| 'stale'（原记录已变化或本机写入失败）
+export function commitEdit(slot : EditSlot) : string {
+	const s = slot.session
+	if (slot.mode == 'edit') {
+		const target = findFinishedById(s.id)
+		if (target == null) return 'stale'
+		s.date = target.date
+		s.startedAt = target.startedAt
+		s.cloudRevision = target.cloudRevision
+	}
+	const t = sessionTotals(s)
+	if (t.workDone + t.warmupDone == 0) return 'empty'
+	const now = Date.now()
+	s.status = 'finished'
+	s.finishedAt = slot.mode == 'edit' && s.finishedAt > 0 ? s.finishedAt : now
+	s.editing = null
+	s.updatedAt = now
+	s.durationSent = false
+	// 仅热身不提交云端（与结束训练同一口径）；但编辑云端已知的记录时必须推送覆写，保持两端一致
+	const knownToCloud = slot.mode == 'edit' && (s.cloudRevision ?? 0) > 0
+	s.cloudStatus = t.workDone > 0 || knownToCloud ? 'pending' : 'skipped'
+	const cur = loadSession()
+	let ok : boolean
+	if (cur != null && cur.id == s.id) {
+		// 被编辑的记录恰好占着当前会话位（已结束）：原位更新，不动其他任何训练
+		ok = writeJson(SESSION_KEY, s)
+	} else {
+		ok = archiveSession(s)
+	}
+	if (!ok) {
+		uni.showToast({ title: '本机保存失败，请重试', icon: 'none' })
+		return 'stale'
+	}
+	if (s.cloudStatus == 'pending') {
+		try {
+			queueCloud('session', s.id, JSON.stringify(s), false, s.cloudRevision ?? 0)
+		} catch (e) {
+			console.error('Edit retained locally; sync journal failed', e)
+		}
+	}
+	writeEditSlot(null)
+	uni.$emit('workout-saved')
 	return 'recorded'
 }

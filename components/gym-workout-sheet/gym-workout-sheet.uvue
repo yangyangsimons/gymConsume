@@ -122,8 +122,8 @@
 	import { loadPreviousWorkouts } from '@/services/gym-days.uts'
 	import {
 		EditingDraft, ExerciseProgress, ExerciseTarget, KIND_WARMUP, KIND_WORK, RIR_UNSET, SetEntry, SessionExercise,
-		WorkoutSession, cloneExercise, exerciseProgress, formatTarget, hasInput, loadSession, newSessionExercise, newSet, rirLabel,
-		saveSession, validateSet
+		WorkoutSession, cloneExercise, exerciseProgress, formatTarget, hasInput, loadEditSlotSession, loadSession, newSessionExercise, newSet, rirLabel,
+		saveEditSlotSession, saveSession, validateSet
 	} from '@/services/workout-session.uts'
 	import { confirmDialog, infoDialog } from '@/services/gym-dialog.uts'
 	import { flushCloud } from '@/services/gym-cloud.uts'
@@ -149,14 +149,20 @@
 
 	const RIR_HELP = '剩余次数 RIR：完成这一组后，你估计还能以相同动作标准再做几次？例如，选择 2，表示大约还能做 2 次。'
 
-	const { editIndex = -1 } = defineProps<{
+	const { editIndex = -1, editSlot = false } = defineProps<{
 		editIndex ?: number
+		// true 时编辑“补记 / 历史记录”的独立草稿（编辑槽），与当前训练互不干扰
+		editSlot ?: boolean
 	}>()
 
 	const emit = defineEmits(['close', 'saved'])
 
-	// 本弹层只编辑总览页已经打开的当前训练，从不创建训练
-	const session : WorkoutSession = loadSession()!
+	// 本弹层只编辑已经存在的会话（当前训练或编辑槽草稿），从不创建训练
+	const session : WorkoutSession = (editSlot ? loadEditSlotSession() : loadSession())!
+
+	function persistSession() : boolean {
+		return editSlot ? saveEditSlotSession(session) : saveSession(session)
+	}
 	const step = ref<string>('select')
 	const work = ref<SessionExercise | null>(null)
 	let baseline = ''
@@ -251,7 +257,7 @@
 		const ex = work.value
 		if (ex == null) return
 		session.editing = { index: editingIndex, baseline: baseline, exercise: ex } as EditingDraft
-		saveSession(session)
+		persistSession()
 	}
 
 	function schedulePersist() {
@@ -538,7 +544,7 @@
 			session.exercises.push(copy)
 		}
 		session.editing = null
-		if (!saveSession(session)) {
+		if (!persistSession()) {
 			uni.showToast({ title: '本机保存失败，请重试', icon: 'none' })
 			return
 		}
@@ -570,7 +576,7 @@
 			persistTimer = -1
 		}
 		session.editing = null
-		saveSession(session)
+		persistSession()
 		emit('close')
 	}
 

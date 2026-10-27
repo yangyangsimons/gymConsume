@@ -28,6 +28,12 @@ export type Exercise = {
 	icon : string
 	category : string
 	pinyin : string
+	// 可选扩展字段：type = '复合' | '孤立'；bodyweight = 是否自重动作；deprecated = 是否弃用（弃用后新建训练不可选、统计时按 aliasId 合并）
+	type ?: string
+	bodyweight ?: boolean
+	deprecated ?: boolean
+	// 弃用动作的替代 id；统计时把 deprecated=true 的 exerciseId 映射到这里
+	aliasId ?: string
 }
 
 function pad(n : number) : string {
@@ -84,4 +90,94 @@ export function lastSetsOf(workouts : Workout[], exerciseId : string) : SetLog[]
 		}
 	}
 	return []
+}
+
+// ---------------------------------------------------------------- 新统计辅助（1RM / 自重 / 动作映射 / 组有效性）
+// Epley 公式估算 1RM：reps=1 直接取 weight；reps>12 或 weight 非正数时返回 null
+// 自重动作（bodyweight=true）不计算 1RM，因为 weight 是额外负重（可正可负可为 0），不代表绝对力量上限
+export function epleyOneRepMax(weight : number, reps : number, bodyweight : boolean) : number | null {
+	if (!isFinite(reps) || reps <= 0 || reps > 12) return null
+	if (!isFinite(weight) || weight <= 0) return null
+	if (bodyweight) return null
+	if (reps == 1) return weight  // 次数为 1 时直接取重量
+	const raw = weight * (1 + reps / 30)
+	return Math.round(raw * 2) / 2  // 四舍五入到 0.5kg
+}
+
+// 自重动作的带符号 weight 处理：
+//   bodyweight=true  → 负数 = 辅助，0 = 纯自重，正数 = 额外负重
+//   bodyweight=false → 负数视为非法
+// 返回 { weight: 解析后的数值（非法则 null）, valid: 是否合法 }
+export function parseSignedWeight(raw : number, bodyweight : boolean) : number | null {
+	if (!isFinite(raw)) return null
+	if (bodyweight) return raw  // 自重允许负/0/正
+	if (raw < 0) return null    // 非自重出现负数 → 非法
+	return raw
+}
+
+// 单组有效性判定（用于所有统计的基础过滤）：
+// - reps 解析后必须 > 0
+// - 自重动作 weight 可为负/0/正；非自重必须 >= 0
+// 返回 true 表示这组能参与统计（热身/正式由上层控制）
+export function isValidStatGroup(weight : number, reps : number, bodyweight : boolean) : boolean {
+	if (!isFinite(reps) || reps <= 0) return false
+	if (!isFinite(weight)) return false
+	if (!bodyweight && weight < 0) return false
+	return true
+}
+
+// 动作别名映射：弃用 shoulder-03 → back-13（面拉归背）
+// 后面 gym-insights 里的所有统计入口都应先过这层映射
+// 动作别名映射：弃用动作 → 替代动作。运行时**硬编码**在此。
+// 注：数据库 exercises 集合里的 deprecated=true 记录有 aliasId 字段（由 seed_exercises.js 写入），
+// 但运行时代码目前**不读取** aliasId 字段——alias 完全靠这个硬编码 Map。
+// 未来可以改为：启动时从 library 里扫所有 deprecated=true 的记录，用它们的 aliasId 动态构建此 Map。
+// 这样新增弃用动作只需写数据库，不用改代码。
+export const EXERCISE_ALIASES = { 'shoulder-03': 'back-13' } as Record<string, string>
+
+export function aliasExerciseId(exerciseId : string) : string {
+	const alias = EXERCISE_ALIASES[exerciseId]
+	return alias != null ? alias : exerciseId
+}
+
+// 从动作库查找 bodyweight 标记（找不到的动作默认 false）
+export function isBodyweight(exerciseId : string, library : Exercise[]) : boolean {
+	const id = aliasExerciseId(exerciseId)
+	for (let i = 0; i < library.length; i++) {
+		if (library[i]._id == id) return library[i].bodyweight === true
+	}
+	return false
+}
+
+// 从动作库查找 type（复合/孤立）。找不到 → 返回 ''，由调用方再走历史兜底
+export function exerciseType(exerciseId : string, library : Exercise[]) : string {
+	const id = aliasExerciseId(exerciseId)
+	for (let i = 0; i < library.length; i++) {
+		if (library[i]._id == id) {
+			const t = library[i].type
+			if (t == '复合' || t == '孤立') return t
+		}
+	}
+	return ''
+}
+
+// 从动作库查找 category。找不到 → 返回 ''
+export function exerciseCategory(exerciseId : string, library : Exercise[]) : string {
+	const id = aliasExerciseId(exerciseId)
+	for (let i = 0; i < library.length; i++) {
+		if (library[i]._id == id) {
+			const c = library[i].category
+			return c != null ? c : ''
+		}
+	}
+	return ''
+}
+
+// 弃用动作列表（新建训练时应隐藏）
+export function deprecatedIds(library : Exercise[]) : string[] {
+	const out : string[] = []
+	for (let i = 0; i < library.length; i++) {
+		if (library[i].deprecated === true) out.push(library[i]._id)
+	}
+	return out
 }

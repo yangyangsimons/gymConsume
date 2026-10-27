@@ -36,6 +36,13 @@
 			}
 		},
 		{
+			"path": "pages/workout-edit/workout-edit",
+			"style": {
+				"navigationBarTitleText": "训练记录",
+				"navigationBarBackgroundColor": "#f6f8f6"
+			}
+		},
+		{
 			"path": "pages/exercise-library/exercise-library",
 			"style": {
 				"navigationBarTitleText": "动作库",

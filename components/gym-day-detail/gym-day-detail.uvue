@@ -37,7 +37,14 @@
 							<text class="dd-set" :class="{ warm: set.warm }" v-for="(set, i) in ex.sets" :key="i">{{ set.text }}</text>
 						</view>
 					</view>
+					<view class="dd-actions" v-if="card.sessionId != '' && !card.active">
+						<button class="dd-link" @click="onEdit(card)">编辑记录</button>
+					</view>
 				</view>
+				<button class="dd-makeup" v-if="canMakeup" @click="onMakeup">
+					<gym-icon name="plus-brand" :size="16"></gym-icon>
+					<text>补记这一天的训练</text>
+				</button>
 				<view class="dd-pad"></view>
 			</view>
 		</scroll-view>
@@ -45,7 +52,7 @@
 </template>
 
 <script setup lang="uts">
-	import { parseDate } from '@/services/gym-stats.uts'
+	import { parseDate, formatDate } from '@/services/gym-stats.uts'
 	import { DayEntry, STATUS_ACTIVE, entriesOnDate, entryNote, entryTag, entryTitle } from '@/services/gym-calendar.uts'
 	import { loadDayData } from '@/services/gym-days.uts'
 
@@ -61,6 +68,8 @@
 	}
 	type EntryCard = {
 		key : string
+		// 本机训练的 ID（key 形如 local:<id>）；云端按天合并的记录为空串，不可按场编辑
+		sessionId : string
 		title : string
 		tag : string
 		active : boolean
@@ -106,6 +115,7 @@
 			}
 			out.push({
 				key: e.key,
+				sessionId: e.key.startsWith('local:') ? e.key.substring(6) : '',
 				title: entryTitle(e),
 				tag: tag,
 				active: e.status == STATUS_ACTIVE,
@@ -119,13 +129,38 @@
 		return out
 	})
 
-	onMounted(() => {
+	// 今天或过去可以补记；未来日期不提供入口
+	const canMakeup = computed(() : boolean => {
+		const date = props.date ?? ''
+		return date != '' && date <= formatDate(new Date())
+	})
+
+	function onMakeup() {
+		uni.navigateTo({ url: '/pages/workout-edit/workout-edit?mode=makeup&date=' + (props.date ?? '') })
+	}
+
+	function onEdit(card : EntryCard) {
+		if (card.sessionId == '') return
+		uni.navigateTo({ url: '/pages/workout-edit/workout-edit?mode=edit&id=' + card.sessionId })
+	}
+
+	function reload() {
 		loadDayData().then((data) => {
 			entries.value = data.entries
 			loading.value = false
 		}).catch(() => {
 			loading.value = false
 		})
+	}
+
+	onMounted(() => {
+		reload()
+		// 补记 / 编辑保存后返回本页时刷新
+		uni.$on('workout-saved', reload)
+	})
+
+	onUnmounted(() => {
+		uni.$off('workout-saved', reload)
 	})
 </script>
 
@@ -304,6 +339,51 @@
 		color: #8d9691;
 		background-color: #f5f6f5;
 	}
+
+	.dd-actions {
+		display: flex;
+		flex-direction: row;
+		justify-content: flex-end;
+		margin-top: 12px;
+		padding-top: 12px;
+		border-top-width: 1px;
+		border-top-style: solid;
+		border-top-color: #eef1ef;
+	}
+
+	.dd-link {
+		margin: 0;
+		padding: 6px 0 6px 12px;
+		border-width: 0;
+		color: #25805d;
+		background-color: transparent;
+		font-size: 13px;
+		line-height: 1.4;
+	}
+
+	.dd-makeup {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		margin-top: 14px;
+		padding: 11px;
+		border-width: 1px;
+		border-style: dashed;
+		border-color: #c4cec8;
+		border-radius: 14px;
+		color: #348365;
+		background-color: transparent;
+		font-size: 14px;
+	}
+
+	/* #ifdef MP-WEIXIN */
+	.dd-link::after,
+	.dd-makeup::after {
+		border-width: 0;
+	}
+	/* #endif */
 
 	.dd-pad {
 		height: 32px;

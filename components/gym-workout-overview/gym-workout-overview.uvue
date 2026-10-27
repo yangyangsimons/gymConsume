@@ -75,6 +75,7 @@
 			<view class="ov-footer-row" v-else-if="isFinished">
 				<button class="ov-secondary" v-if="session != null && (session.cloudStatus === 'failed' || session.cloudStatus === 'pending')" :disabled="syncing"
 					@click="onRetry">{{ syncing ? '提交中…' : '重试提交' }}</button>
+				<button class="ov-secondary" @click="onEditRecord">编辑记录</button>
 				<button class="ov-primary" @click="goHome">返回首页</button>
 			</view>
 			<button class="ov-primary" v-else-if="cards.length === 0" @click="onAdd">＋ 添加动作</button>
@@ -123,8 +124,15 @@
 	function reload() {
 		session.value = loadSession()
 	}
-	onMounted(() => uni.$on('cloud-sync-changed', reload))
-	onUnmounted(() => uni.$off('cloud-sync-changed', reload))
+	onMounted(() => {
+		uni.$on('cloud-sync-changed', reload)
+		// 编辑记录保存后返回本页时刷新
+		uni.$on('workout-saved', reload)
+	})
+	onUnmounted(() => {
+		uni.$off('cloud-sync-changed', reload)
+		uni.$off('workout-saved', reload)
+	})
 
 	// 指定 ID 时把该训练设为当前会话（ID、开始时间、日期保持不变）；找不到则显示空状态
 	if (sessionId != '') activateSession(sessionId)
@@ -286,6 +294,13 @@
 		const s = session.value
 		if (s == null || syncing.value) return
 		await runSync(s)
+	}
+
+	// 编辑已结束的历史记录：保持 ID / 日期不变，在独立编辑页修改
+	function onEditRecord() {
+		const s = session.value
+		if (s == null || s.status != 'finished') return
+		uni.navigateTo({ url: '/pages/workout-edit/workout-edit?mode=edit&id=' + s.id })
 	}
 </script>
 
