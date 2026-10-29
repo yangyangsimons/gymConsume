@@ -136,6 +136,7 @@
 	})
 
 	function onMakeup() {
+		console.log('[gym-day-detail] onMakeup date=' + (props.date ?? '') + ' entryKey=' + (props.entryKey ?? ''))
 		uni.navigateTo({ url: '/pages/workout-edit/workout-edit?mode=makeup&date=' + (props.date ?? '') })
 	}
 

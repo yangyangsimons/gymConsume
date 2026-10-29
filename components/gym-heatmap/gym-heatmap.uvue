@@ -10,7 +10,7 @@
 				<text class="hm-info" @click="showInfo">ⓘ</text>
 			</view>
 		</view>
-		<text class="hm-desc">每日完成正式组数 · 近 {{ WEEKS }} 周</text>
+		<text class="hm-desc">每日完成正式组数</text>
 
 		<view class="hm-wrap">
 			<view class="hm-weekdays">
@@ -39,7 +39,7 @@
 			<view class="hm-legend-box" :style="{ backgroundColor: step.color }" v-for="step in steps" :key="step.level"></view>
 			<text class="hm-legend-text">多</text>
 		</view>
-		<text class="hm-summary">训练 {{ heatmap.activeDays }} 天 · 完成 {{ heatmap.totalSets }} 组</text>
+		<text class="hm-summary" v-if="longestStreak != null && longestStreak > 0">最长连续达标 {{ longestStreak }} 周</text>
 
 		<view class="hm-detail" v-if="selectedDate !== ''">
 			<view class="hm-detail-head">
@@ -84,9 +84,11 @@
 		entries : DayEntry[]
 		today : string
 		demo ?: boolean
+		weeks ?: number
+		longestStreak ?: number
 	}>()
 
-	const WEEKS = 12
+	const WEEKS = computed(() : number => props.weeks != null ? props.weeks : 12)
 	const weekdayLabels : string[] = ['一', '', '三', '', '五', '', '日']
 	const weekNames : string[] = ['日', '一', '二', '三', '四', '五', '六']
 	const steps : HeatStep[] = HEAT_STEPS
@@ -94,7 +96,7 @@
 	const selectedDate = ref<string>('')
 
 	const trained = computed(() : Map<string, number> => trainedDaysMap(props.entries))
-	const heatmap = computed(() : Heatmap => buildHeatmap(trained.value, props.today, WEEKS))
+	const heatmap = computed(() : Heatmap => buildHeatmap(trained.value, props.today, WEEKS.value))
 
 	function onSelect(cell : HeatCell) {
 		// 未来日期不可点击

@@ -333,15 +333,20 @@ export function sessionHasCompletedSets(s : WorkoutSession) : boolean {
 	return t.workDone + t.warmupDone > 0
 }
 
-// 会话中是否有任何已填写内容（含尚未保存的动作编辑），用于区分“空草稿”
-export function sessionHasFilledSets(s : WorkoutSession) : boolean {
-	if (s.editing != null) return true
-	for (let i = 0; i < s.exercises.length; i++) {
-		const sets = s.exercises[i].sets
-		for (let j = 0; j < sets.length; j++) {
-			if (hasInput(sets[j])) return true
-		}
+// 正在编辑但尚未保存的动作：只有组里存在实际输入才算，仅有默认目标 / 空组不算
+function editingHasInput(ex : SessionExercise) : boolean {
+	for (let i = 0; i < ex.sets.length; i++) {
+		if (hasInput(ex.sets[i])) return true
 	}
+	return false
+}
+
+// 统一草稿内容判断，用于“空草稿可清理”与“是否需要恢复 / 冲突确认”。
+// 已选择动作（exercises 非空）、存在实际输入或已完成组都算有内容；
+// 仅有默认目标、空组或 editing 对象存在都不算已填写。
+export function sessionHasContent(s : WorkoutSession) : boolean {
+	if (s.exercises.length > 0) return true
+	if (s.editing != null && s.editing.exercise != null) return editingHasInput(s.editing.exercise)
 	return false
 }
 
@@ -407,7 +412,15 @@ function repairSession(s : WorkoutSession) : WorkoutSession {
 // 版本不匹配时返回 null 且不会删除原数据
 export function loadSession() : WorkoutSession | null {
 	const raw = readJson(SESSION_KEY)
-	if (raw == null) return remoteSessions().find((s : WorkoutSession) : boolean => s.status == 'active') ?? null
+	if (raw == null) {
+		// 本机没有当前会话时才考虑云端恢复：只接受确实有内容的未结束训练，
+		// 避免已清理的空草稿被云端重新拉回
+		const remote = remoteSessions()
+		for (let i = 0; i < remote.length; i++) {
+			if (remote[i].status == 'active' && sessionHasContent(remote[i])) return remote[i]
+		}
+		return null
+	}
 	const s = raw as WorkoutSession
 	if (s.version != SESSION_VERSION || s.exercises == null) return null
 	if (!canUseLocal('session', s.id)) return null
@@ -451,15 +464,42 @@ export function saveSession(s : WorkoutSession) : boolean {
 	}
 }
 
+// 丢弃当前会话。删除会登记到云端队列，即使本机已无数据、云端仍有旧副本，
+// 也不会在下次 loadSession 时被恢复回来。
 export function clearSession() {
 	try {
 		const s = loadSession()
-		if (s != null && cloudStatus('session', s.id) != 'none') queueCloud('session', s.id, '{}', true)
+		if (s != null) queueCloud('session', s.id, '{}', true)
 		uni.removeStorageSync(SESSION_KEY)
 	} catch (e) {
 		console.error('Could not discard session', e)
 		uni.showToast({ title: '草稿移除失败，请重试', icon: 'none' })
 	}
+}
+
+// 清理“无动作且无实际输入”的未结束草稿（当前会话 + 本机历史）。
+// 只移除空草稿，不删除已结束记录，也不改动其他有内容的训练。返回清理数量。
+export function pruneEmptyDrafts() : number {
+	let removed = 0
+	const cur = loadSession()
+	if (cur != null && cur.status == 'active' && !sessionHasContent(cur)) {
+		queueCloud('session', cur.id, '{}', true)
+		uni.removeStorageSync(SESSION_KEY)
+		removed++
+	}
+	const list = readHistory()
+	const keep : WorkoutSession[] = []
+	for (let i = 0; i < list.length; i++) {
+		const s = list[i]
+		if (s.status == 'active' && !sessionHasContent(s)) {
+			queueCloud('session', s.id, '{}', true)
+			removed++
+			continue
+		}
+		keep.push(s)
+	}
+	if (keep.length != list.length) writeJson(HISTORY_KEY, keep)
+	return removed
 }
 
 // none | active | finished | finished-failed
@@ -527,24 +567,10 @@ function archiveSession(s : WorkoutSession) : boolean {
 	return writeJson(HISTORY_KEY, list)
 }
 
-// 当前会话与本机历史中，开始日期为 date 的未结束训练（当前会话优先）
-export function findActiveOn(date : string) : WorkoutSession | null {
-	const cur = loadSession()
-	if (cur != null && cur.status == 'active' && cur.date == date) return cur
-	const list = readHistory()
-	for (let i = 0; i < list.length; i++) {
-		if (list[i].status == 'active' && list[i].date == date) return list[i]
-	}
-	return null
-}
-
-// 开始今天的新训练。日期与开始时间只取自传入的时钟 now（调用方在点击时取当前本地时间），不接受任何外部日期。
-// - 今天已有未结束的训练时直接返回它，不重复新建；
-// - 其他日期的未结束草稿、上一场已结束的训练会被移入本机历史，不会被覆盖或删除。
+// 开始一场新训练。日期与开始时间只取自传入的时钟 now（调用方在点击时取当前本地时间），不接受任何外部日期。
+// 同一天允许多场训练：当前会话先归档进本机历史（不覆盖、不删除其内容），再新建空会话。
 export function createSession(now : Date) : WorkoutSession {
 	const today = formatDate(now)
-	const same = findActiveOn(today)
-	if (same != null) return activateSession(same.id) ?? same
 	const cur = loadSession()
 	if (cur != null && !archiveSession(cur)) {
 		uni.showToast({ title: '旧草稿保留失败，未开始新训练', icon: 'none' })

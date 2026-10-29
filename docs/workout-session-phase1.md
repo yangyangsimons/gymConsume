@@ -142,6 +142,7 @@ key 带版本号；版本不匹配时读取为空且不删除原数据。不读�
 - 底部弹层统一使用 `styles/sheet.scss` 的 `.sheet-grabber`（36×4、圆角 2、`#d9dfdb`）和遮罩 `.sheet-mask` / `.sheet-mask-light`（二级弹层用浅遮罩，避免叠加压黑）。
 - 模态弹层（周目标、动作选择）挂载时 `lockTabBar()` 隐藏原生 TabBar，卸载时 `unlockTabBar()` 恢复（`services/gym-modal.uts`，引用计数）。
 - tab 页面顶部由 `.app-shell` 预留“状态栏 + 44px 导航行”，页面标题区不再自己加状态栏高度。
+- 数据页保留两个 Canvas，使用页面原生滚动而非内层 `scroll-view`；顶部预留区使用低于弹层的固定背景，避免内容滚入胶囊区域。折线图按实际布局宽度绘制，不再按屏幕宽度估算。快速滑动时需在真机核对曲线与纵轴、圆环与中心文字的相对位置。
 ## 开始 / 继续训练与日期（修复）
 
 - 日期来源：新训练的 `date` / `startedAt` 只取 `createSession(now)` 传入的点击时本地时间；日历选中日期只用于浏览，不参与任何创建 / 恢复 / 结束逻辑。

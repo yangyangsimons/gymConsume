@@ -1,9 +1,12 @@
 <template>
 	<view class="an-root">
-		<scroll-view class="app-content" scroll-y="true">
+		<view class="an-content">
 		<view class="page-header">
 			<text class="eyebrow">你的训练表现</text>
 			<text class="heading-1">数据统计</text>
+			<picker mode="selector" :range="rangeLabels" :value="rangeIndex" @change="onRangeChange">
+				<view class="an-range-picker">{{ rangeLabel }} ▾</view>
+			</picker>
 		</view>
 
 		<view class="demo-banner" v-if="demoMode">
@@ -12,25 +15,53 @@
 		</view>
 		<text class="load-note" v-else-if="cloudState === 'failed'">云端训练记录加载失败，当前仅显示本机记录。</text>
 
+		<!-- 概览卡 -->
 		<view class="stat-grid">
-				<view class="stat-card first">
-					<text class="stat-label">训练天数</text>
-					<text class="stat-value">{{ overview.days }}<text class="stat-unit"> 天</text></text>
-					<text class="stat-meta">近 90 天</text>
+			<view class="stat-card">
+				<text class="stat-label">训练次数</text>
+				<view class="stat-value-row">
+					<text class="stat-value">{{ overview.trainDays.cur }}</text>
+					<text class="stat-unit">次</text>
 				</view>
-				<view class="stat-card">
-					<text class="stat-label">训练容量</text>
-					<text class="stat-value">{{ volumeText.value }}<text class="stat-unit"> {{ volumeText.unit }}</text></text>
-					<text class="stat-meta positive" v-if="overview.hasPrev">{{ overview.tonsChangePct >= 0 ? '↑' : '↓' }} {{ Math.abs(overview.tonsChangePct) }}% 较前 90 天</text>
-					<text class="stat-meta" v-else>近 90 天</text>
-				</view>
+				<text class="stat-meta" v-if="overview.trainDays.showDelta">
+					<text :class="{ positive: overview.trainDays.delta >= 0, negative: overview.trainDays.delta < 0 }">
+						{{ overview.trainDays.delta >= 0 ? '↑' : '↓' }} {{ Math.abs(overview.trainDays.delta) }}
+					</text>
+					<span class="stat-meta-sep">较上周期</span>
+				</text>
+				<text class="stat-meta" v-else>—</text>
 			</view>
+			<view class="stat-card">
+				<text class="stat-label">总容量</text>
+				<view class="stat-value-row">
+					<text class="stat-value">{{ volumeText.value }}</text>
+					<text class="stat-unit">{{ volumeText.unit }}</text>
+				</view>
+				<text class="stat-meta" v-if="overview.volume.showDelta">
+					<text :class="{ positive: overview.volume.deltaPct >= 0, negative: overview.volume.deltaPct < 0 }">
+						{{ overview.volume.deltaPct >= 0 ? '↑' : '↓' }} {{ Math.abs(overview.volume.deltaPct) }}%
+					</text>
+					<span class="stat-meta-sep">较上周期</span>
+				</text>
+				<text class="stat-meta" v-else>—</text>
+			</view>
+			<view class="stat-card">
+				<text class="stat-label">周达标</text>
+				<view class="stat-value-row">
+					<text class="stat-value">{{ overview.weeksGoal.metWeeks }}</text>
+					<text class="stat-unit">/ {{ overview.weeksGoal.totalWeeks }} 周</text>
+				</view>
+				<text class="stat-meta">{{ goalSummary }}</text>
+			</view>
+		</view>
 
-		<gym-heatmap :entries="entries" :today="today" :demo="demoMode"></gym-heatmap>
+		<gym-heatmap :entries="entries" :today="today" :demo="demoMode" :weeks="heatmapWeeks" :longest-streak="longestStreak"></gym-heatmap>
 
 		<gym-exercise-performance :entries="entries" :library="library" :today="today" :demo="demoMode"
+			:range="rangeKey"
 			@open-picker="onOpenPicker"></gym-exercise-performance>
 
+		<!-- 部位分布（环形图内联） -->
 		<view class="analytics-card">
 			<view class="section-heading">
 				<view>
@@ -39,38 +70,42 @@
 				</view>
 				<text class="demo-tag" v-if="demoMode">演示数据</text>
 			</view>
-			<view class="muscle-bar">
-				<view class="muscle-seg" :class="muscleColors[idx]" :style="{ width: share.percent + '%' }"
-					v-for="(share, idx) in muscle.shares" :key="share.name"></view>
-			</view>
-			<view class="distribution-content">
-				<view class="muscle-total">
-					<text class="donut-value">{{ muscle.totalSets }}</text>
-					<text class="donut-label">总组数 · 近 90 天</text>
+			<view class="muscle-chart-row">
+				<canvas type="2d" id="muscleDonut" class="muscle-canvas"
+					:style="{ width: muscleCanvasSize + 'px', height: muscleCanvasSize + 'px' }"></canvas>
+				<view class="muscle-center">
+					<text class="muscle-type-title">复合 : 孤立</text>
+					<text class="muscle-type-ratio">{{ typeRatio }}</text>
+					<text class="muscle-total-sub">总组数 {{ muscle.totalSets }}</text>
 				</view>
-				<view class="muscle-list">
-					<view class="muscle-row" v-for="(share, idx) in muscle.shares" :key="share.name">
-						<view class="muscle-dot" :class="muscleColors[idx]"></view>
-						<text class="muscle-name">{{ share.name }}</text>
-						<text class="muscle-value">{{ share.percent }}%</text>
-					</view>
+			</view>
+			<view class="muscle-legend">
+				<view class="muscle-row" v-for="(share, idx) in sortedShares" :key="share.name">
+					<view class="muscle-dot" :style="{ backgroundColor: palette[idx % palette.length] }"></view>
+					<text class="muscle-name">{{ share.name }}</text>
+					<text class="muscle-value">{{ share.percent }}%</text>
 				</view>
 			</view>
 		</view>
-		</scroll-view>
+		</view>
 
-		<!-- 弹层放在 scroll-view 之外，避免 iOS 真机上 fixed 被滚动容器限制成内容宽度 -->
+		<!-- 弹层不放入带页面留白的内容容器 -->
 		<gym-exercise-picker v-if="showPicker" :options="pickerOptions" :selected-id="pickerSelected"
 			@select="onPickExercise" @close="showPicker = false"></gym-exercise-picker>
 	</view>
 </template>
 
 <script setup lang="uts">
+	import { getCurrentInstance } from 'vue'
 	import { Exercise, Workout, formatDate } from '@/services/gym-stats.uts'
 	import { loadExercises, loadWorkouts } from '@/services/gym-api.uts'
 	import { WorkoutSession, loadHistorySessions, loadSession } from '@/services/workout-session.uts'
 	import { DayEntry, buildDayEntries } from '@/services/gym-calendar.uts'
-	import { ExerciseOption, MuscleStats, Overview, ValueUnit, calcMuscleStats, calcOverview, formatVolume } from '@/services/gym-insights.uts'
+	import {
+		AnalyticsOverview, ExerciseOption, MuscleStats, RANGE_4W, RANGE_6M, RANGE_12W, buildOverviewForAnalytics, calcMuscleStats,
+		collectOccurrences, findPRs, formatVolume, longestStreakWeeks
+	} from '@/services/gym-insights.uts'
+	import { loadGoalConfig, WeeklyGoalConfig } from '@/services/weekly-goal.uts'
 	import { DEMO_MODE, demoExercises, demoSessions } from '@/services/gym-demo.uts'
 
 	type PickerPayload = {
@@ -78,20 +113,98 @@
 		selectedId : string
 	}
 
-	const muscleColors : string[] = ['green', 'blue', 'orange', 'gray']
+	// 部位环形图调色板
+	const palette : string[] = ['#1caf73', '#5a91e3', '#e4a85b', '#b57ed5', '#4ecdc4', '#ff6b9d', '#d9dfdb']
+
+	const RANGE_LABELS : string[] = ['近 4 周', '近 12 周', '近半年']
+	const RANGE_KEYS : string[] = [RANGE_4W, RANGE_12W, RANGE_6M]
+	const muscleColorMap : Record<string, string> = {
+		'胸部': '#1caf73', '背部': '#5a91e3', '腿部': '#e4a85b',
+		'肩部': '#b57ed5', '手臂': '#4ecdc4', '核心': '#ff6b9d', '其他': '#d9dfdb'
+	}
+
+	// 组件实例需在 setup 顶层捕获，selectorQuery 回调里再取会拿不到
+	const instance = getCurrentInstance()
+
 	const demoMode : boolean = DEMO_MODE
+	const rangeKey = ref<string>(RANGE_12W)
+	const weeklyGoalCfg = ref<WeeklyGoalConfig>({ version: 1, changes: [] } as WeeklyGoalConfig)
 
 	const workouts = ref<Workout[]>([])
 	const sessions = ref<WorkoutSession[]>([])
 	const exercises = ref<Exercise[]>([])
-	// loading | ok | failed
 	const cloudState = ref<string>('loading')
 	const today = ref<string>(formatDate(new Date()))
 
-	// 动作选择弹层由本组件（scroll-view 之外）渲染，动作表现卡片通过事件请求打开、通过事件接收选择
 	const showPicker = ref<boolean>(false)
 	const pickerOptions = ref<ExerciseOption[]>([])
 	const pickerSelected = ref<string>('')
+	const muscleCanvasSize = ref<number>(180)
+	const muscleCanvasReady = ref<boolean>(false)
+
+	const rangeIndex = computed(() : number => {
+		for (let i = 0; i < RANGE_KEYS.length; i++) if (RANGE_KEYS[i] == rangeKey.value) return i
+		return 1
+	})
+	const rangeLabel = computed(() : string => RANGE_LABELS[rangeIndex.value])
+	const heatmapWeeks = computed(() : number => {
+		if (rangeKey.value == RANGE_4W) return 4
+		if (rangeKey.value == RANGE_6M) return 26
+		return 12
+	})
+
+	const entries = computed(() : DayEntry[] => {
+		if (demoMode) return buildDayEntries([], demoSessions(today.value), true)
+		return buildDayEntries(workouts.value, sessions.value, cloudState.value == 'ok')
+	})
+	const library = computed(() : Exercise[] => demoMode ? demoExercises() : exercises.value)
+
+	const occs = computed(() => collectOccurrences(entries.value))
+	const prs = computed(() => findPRs(occs.value.items, library.value))
+
+	const overview = computed(() : AnalyticsOverview => {
+		if (demoMode) {
+			// 演示模式不依赖 weekly goal config
+			const cfg = weeklyGoalCfg.value
+			return buildOverviewForAnalytics(entries.value, library.value, prs.value, today.value, rangeKey.value, cfg)
+		}
+		return buildOverviewForAnalytics(entries.value, library.value, prs.value, today.value, rangeKey.value, weeklyGoalCfg.value)
+	})
+
+	const muscle = computed(() : MuscleStats => calcMuscleStats(entries.value, today.value, rangeKey.value, library.value))
+
+	// 0 组的部位不进图例，其余按占比降序
+	const sortedShares = computed(() => {
+		const arr = muscle.value.shares.filter((s : any) : boolean => s.sets > 0)
+		arr.sort((a : any, b : any) : number => b.percent - a.percent)
+		return arr
+	})
+
+	const volumeText = computed(() => formatVolume(overview.value.volume.cur))
+	const longestStreak = computed(() : number => {
+		if (demoMode) return 0
+		return longestStreakWeeks(entries.value, today.value, weeklyGoalCfg.value, rangeKey.value)
+	})
+	const goalSummary = computed(() : string => {
+		const ov = overview.value
+		if (ov.weeksGoal.totalWeeks == 0) return '—'
+		return '达标率 ' + (ov.weeksGoal.totalWeeks > 0 ? Math.round(ov.weeksGoal.metWeeks / ov.weeksGoal.totalWeeks * 100) : 0) + '%'
+	})
+
+	// 复合 : 孤立 按 10 份取整（如 3 : 7）；无有效组时显示占位
+	const typeRatio = computed(() : string => {
+		const compound = muscle.value.typeGroups.compound
+		const t = compound + muscle.value.typeGroups.isolated
+		if (t <= 0) return '- : -'
+		const c = Math.round(compound / t * 10)
+		return c + ' : ' + (10 - c)
+	})
+
+	function onRangeChange(e : any) {
+		const idx = parseInt(e.detail.value)
+		if (idx < 0 || idx >= RANGE_KEYS.length) return
+		rangeKey.value = RANGE_KEYS[idx]
+	}
 
 	function onOpenPicker(p : PickerPayload) {
 		pickerOptions.value = p.options
@@ -104,17 +217,62 @@
 		uni.$emit('exercise-performance-pick', id)
 	}
 
-	// 热力图、动作表现、概览、部位分布共用这一份记录（与首页同一数据源和计入规则）。
-	// 演示模式只使用本地生成的演示会话，不读取真实历史。
-	const entries = computed(() : DayEntry[] => {
-		if (demoMode) return buildDayEntries([], demoSessions(today.value), true)
-		return buildDayEntries(workouts.value, sessions.value, cloudState.value == 'ok')
-	})
-	const library = computed(() : Exercise[] => demoMode ? demoExercises() : exercises.value)
+	// 环形图绘制
+	function drawDonut() {
+		if (!muscleCanvasReady.value) return
+		if (instance == null) return
+		const shares = sortedShares.value
+		if (shares.length == 0) return
+		const totalSets = muscle.value.totalSets
+		if (totalSets <= 0) return
+		const query = uni.createSelectorQuery().in((instance as any).proxy)
+		query.select('#muscleDonut').fields({ node: true, size: true }).exec((res) => {
+			if (res == null || res[0] == null) return
+			const canvas = res[0].node
+			const ctx = canvas.getContext('2d')
+			const dpr = uni.getSystemInfoSync().pixelRatio
+			const size = muscleCanvasSize.value
+			canvas.width = size * dpr
+			canvas.height = size * dpr
+			ctx.scale(dpr, dpr)
+			ctx.clearRect(0, 0, size, size)
 
-	const overview = computed(() : Overview => calcOverview(entries.value, today.value))
-	const muscle = computed(() : MuscleStats => calcMuscleStats(entries.value, today.value))
-	const volumeText = computed(() : ValueUnit => formatVolume(overview.value.volumeKg))
+			const cx = size / 2
+			const cy = size / 2
+			const outerR = size / 2 - 4
+			const innerR = outerR - 28
+			let startAngle = -Math.PI / 2
+
+			for (let i = 0; i < shares.length; i++) {
+				const share = shares[i]
+				if (share.sets <= 0) continue
+				// 与图例行取色保持一致：palette 按下标循环
+				const color = palette[i % palette.length]
+				const sweep = (share.sets / totalSets) * Math.PI * 2
+				const endAngle = startAngle + sweep
+
+				ctx.beginPath()
+				ctx.arc(cx, cy, outerR, startAngle, endAngle)
+				ctx.arc(cx, cy, innerR, endAngle, startAngle, true)
+				ctx.closePath()
+				ctx.fillStyle = color
+				ctx.fill()
+
+				startAngle = endAngle
+			}
+		})
+	}
+
+	watch([() => muscle.value, () => muscleCanvasReady.value], () => {
+		drawDonut()
+	}, { deep: true })
+
+	function measureDonut() {
+		const sys = uni.getSystemInfoSync()
+		muscleCanvasSize.value = Math.min(180, Math.max(150, sys.windowWidth * 0.38))
+		muscleCanvasReady.value = true
+		setTimeout(() => { drawDonut() }, 100)
+	}
 
 	function refreshLocal() {
 		today.value = formatDate(new Date())
@@ -125,6 +283,7 @@
 		const hist = loadHistorySessions()
 		for (let i = 0; i < hist.length; i++) out.push(hist[i])
 		sessions.value = out
+		weeklyGoalCfg.value = loadGoalConfig()
 	}
 
 	function refreshCloud() {
@@ -158,6 +317,7 @@
 		refreshLibrary()
 		uni.$on('workout-saved', onSaved)
 		uni.$on('workout-session-changed', refreshLocal)
+		setTimeout(() => { measureDonut() }, 200)
 	})
 
 	onUnmounted(() => {
@@ -172,7 +332,14 @@
 
 	.an-root {
 		width: 100%;
-		height: 100%;
+		overflow: visible;
+	}
+
+	.an-content {
+		width: 100%;
+		padding: 0 $gym-page-gutter $gym-page-gutter;
+		box-sizing: border-box;
+		overflow: visible;
 	}
 
 	.page-header {
@@ -189,6 +356,19 @@
 
 	.heading-1 {
 		font-size: 25px;
+	}
+
+	.an-range-picker {
+		display: inline-block;
+		margin-top: 10px;
+		padding: 7px 12px;
+		border-width: 1px;
+		border-style: solid;
+		border-color: #e2e7e4;
+		border-radius: 10px;
+		color: #526159;
+		background-color: #ffffff;
+		font-size: 13px;
 	}
 
 	.demo-banner {
@@ -223,22 +403,18 @@
 	.stat-grid {
 		display: flex;
 		flex-direction: row;
+		gap: 8px;
 	}
 
 	.stat-card {
 		flex: 1;
 		min-width: 0;
-		margin-left: 8px;
-		padding: 14px 12px;
+		padding: 14px 10px;
 		border-width: 1px;
 		border-style: solid;
 		border-color: #e7ebe8;
 		border-radius: 17px;
 		background-color: #ffffff;
-	}
-
-	.stat-card.first {
-		margin-left: 0;
 	}
 
 	.stat-label {
@@ -247,14 +423,22 @@
 		font-size: 11px;
 	}
 
-	.stat-value {
-		display: block;
+	.stat-value-row {
+		display: flex;
+		flex-direction: row;
+		align-items: baseline;
 		margin: 6px 0 3px;
+	}
+
+	.stat-value {
+		color: #1f2a24;
 		font-size: 21px;
+		font-weight: 700;
 	}
 
 	.stat-unit {
 		margin-left: 3px;
+		color: #1f2a24;
 		font-size: 11px;
 		font-weight: 500;
 	}
@@ -269,54 +453,67 @@
 		color: #17a669;
 	}
 
-	.distribution-content {
+	.stat-meta.negative {
+		color: #9ca49f;
+	}
+
+	.stat-meta-sep {
+		margin-left: 4px;
+	}
+
+	.muscle-chart-row {
 		display: flex;
 		flex-direction: row;
 		align-items: center;
-		justify-content: space-around;
+		justify-content: center;
+		position: relative;
 	}
 
-	.muscle-bar {
-		display: flex;
-		flex-direction: row;
-		height: 10px;
-		margin-bottom: 18px;
-		border-radius: 5px;
-		background-color: #edf1ee;
-		overflow: hidden;
+	.muscle-canvas {
+		display: block;
 	}
 
-	.muscle-seg {
-		height: 10px;
-	}
-
-	.muscle-total {
+	.muscle-center {
+		position: absolute;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		width: 115px;
+		pointer-events: none;
 	}
 
-	.donut-value {
+	.muscle-type-title {
+		color: #6e7973;
+		font-size: 11px;
+		white-space: nowrap;
+	}
+
+	.muscle-type-ratio {
+		color: #1f2a24;
 		font-size: 21px;
+		font-weight: 700;
+		white-space: nowrap;
 	}
 
-	.donut-label {
-		margin-top: 2px;
+	.muscle-total-sub {
+		margin-top: 4px;
 		color: #8a948e;
 		font-size: 10px;
+		white-space: nowrap;
 	}
 
-	.muscle-list {
-		width: 130px;
+	.muscle-legend {
+		margin-top: 14px;
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		gap: 4px 16px;
 	}
 
 	.muscle-row {
 		display: flex;
 		flex-direction: row;
 		align-items: center;
-		margin: 8px 0;
 		color: #76817b;
 		font-size: 11px;
 	}
@@ -324,31 +521,16 @@
 	.muscle-dot {
 		width: 7px;
 		height: 7px;
-		margin-right: 7px;
+		margin-right: 6px;
 		border-radius: 4px;
 	}
 
 	.muscle-name {
-		flex: 1;
+		margin-right: 8px;
 	}
 
 	.muscle-value {
 		color: #354139;
-	}
-
-	.green {
-		background-color: #26bd7c;
-	}
-
-	.blue {
-		background-color: #5a91e3;
-	}
-
-	.orange {
-		background-color: #e4a85b;
-	}
-
-	.gray {
-		background-color: #d9dfdb;
+		font-weight: 600;
 	}
 </style>

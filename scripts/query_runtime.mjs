@@ -41,42 +41,41 @@ function normalize(obj) {
 }
 
 // 单次 MgoCommand：{ TableName, CommandType, Command: JSON.stringify({...}) }
+// 用 --json 让 tcb 输出纯 JSON，解析 data.results[i]（各 MgoCommand 的原始结果）
 function runCmd(mgoCmd) {
 	const cmdStr = JSON.stringify([{
 		TableName: mgoCmd.table,
 		CommandType: mgoCmd.type ?? "QUERY",
 		Command: JSON.stringify(mgoCmd.body),
 	}]);
-	const args = [tcbBin, "db", "nosql", "execute", "-e", ENV, "--command", cmdStr];
+	const args = [tcbBin, "db", "nosql", "execute", "-e", ENV, "--json", "--command", cmdStr];
 	const r = spawnSync(process.execPath, args, { encoding: "utf-8" });
-	const rawStatus = r.status;
-	if (rawStatus !== 0) {
-		return { ok: false, status: rawStatus, error: r.stderr?.trim() || r.stdout?.trim() || "(empty)", stdout: r.stdout, stderr: r.stderr };
+	let parsed = null;
+	try { parsed = JSON.parse(r.stdout || "{}"); } catch (e) {
+		return { ok: false, status: r.status, requestId: null, error: "JSON 解析失败: " + e.message, stdout: r.stdout, stderr: r.stderr };
 	}
-	// 跳开头 3 行 banner: "CloudBase CLI 3.8.9\n试试 tcb ai 命令...\n- 数据加载中...\n"
-	const lines = (r.stdout || "").split("\n");
-	const jsonStart = lines.findIndex((l) => l.trim().startsWith("["));
-	if (jsonStart < 0) {
-		return { ok: false, status: 0, error: "无法在输出中找到 JSON 数组", stdout: r.stdout, stderr: r.stderr };
+	const requestId = parsed?.data?.requestId ?? null;
+	const inner = parsed?.data?.results; // data.results = [cmd0Result, cmd1Result, ...]
+	if (r.status !== 0 || !Array.isArray(inner)) {
+		return { ok: false, status: r.status, requestId, error: "tcb 执行失败", stdout: r.stdout, stderr: r.stderr };
 	}
-	try {
-		const parsed = JSON.parse(lines.slice(jsonStart).join("\n"));
-		return { ok: true, data: normalize(parsed), stdout: r.stdout, stderr: r.stderr };
-	} catch (e) {
-		return { ok: false, status: 0, error: "JSON 解析失败: " + e.message, stdout: r.stdout, stderr: r.stderr };
-	}
+	const norm = normalize(inner);
+	// 只发一条 MgoCommand，取第 0 条的原始结果
+	// find → [{doc1},{doc2}] 数组；aggregate $count → [{n:52}]；aggregate group → [{_id:..., count:...}, ...]
+	return { ok: true, result: norm[0], requestId, stdout: r.stdout, stderr: r.stderr };
 }
 
 function aggregateCount(collection, filter = {}) {
 	const r = runCmd({ table: collection, body: { aggregate: collection, pipeline: [{ $match: filter }, { $count: "n" }], cursor: {} } });
 	if (!r.ok) return { n: 0, _err: r.error };
-	return { n: r.data[0]?.n ?? 0 };
+	// aggregate $count 返回 [{ n: 52 }]
+	return { n: r.result?.[0]?.n ?? 0 };
 }
 
 function aggregateGroup(collection, pipeline) {
 	const r = runCmd({ table: collection, body: { aggregate: collection, pipeline, cursor: {} } });
 	if (!r.ok) return { rows: [], _err: r.error };
-	return { rows: r.data };
+	return { rows: r.result ?? [] };
 }
 
 function find(collection, filter = {}, limit = 500, projection = undefined) {
@@ -85,7 +84,7 @@ function find(collection, filter = {}, limit = 500, projection = undefined) {
 	if (projection != null) body.projection = projection;
 	const r = runCmd({ table: collection, body });
 	if (!r.ok) return { rows: [], _err: r.error };
-	return { rows: r.data };
+	return { rows: r.result ?? [] };
 }
 
 // ============ 执行 ============
@@ -105,12 +104,12 @@ console.log("tcb bin:", tcbBin);
 
 // seed 精简 id 列表（用于对比）
 const SEED_IDS = new Set([
-	"chest-01","chest-02","chest-03","chest-04","chest-05","chest-06","chest-07","chest-08","chest-09","chest-10","chest-11","chest-12",
+	"chest-01","chest-02","chest-03","chest-04","chest-05","chest-06","chest-07","chest-08","chest-09","chest-10","chest-11","chest-12","chest-13","chest-14",
 	"back-01","back-02","back-03","back-04","back-05","back-06","back-07","back-08","back-09","back-10","back-11","back-12","back-13",
 	"legs-01","legs-02","legs-03","legs-04","legs-05","legs-06","legs-07","legs-08","legs-09","legs-10","legs-11",
 	"shoulder-01","shoulder-02","shoulder-03","shoulder-04","shoulder-05","shoulder-06","shoulder-07","shoulder-08","shoulder-09","shoulder-10",
 	"arm-01","arm-02","arm-03","arm-04",
-	"core-01","core-02",
+	"core-01","core-02","core-03","core-04",
 ]);
 
 // seed 的 name/category 对照表（仅用于对比）
@@ -119,8 +118,9 @@ const SEED_NAMES = {
 	"chest-04": ["双杠臂屈伸", "胸"], "chest-05": ["上斜卧推", "胸"], "chest-06": ["史密斯卧推", "胸"],
 	"chest-07": ["史密斯上斜卧推", "胸"], "chest-08": ["哑铃卧推", "胸"], "chest-09": ["器械平板卧推", "胸"],
 	"chest-10": ["器械上斜卧推", "胸"], "chest-11": ["坐姿推胸机", "胸"], "chest-12": ["蝴蝶机夹胸", "胸"],
+	"chest-13": ["哑铃上斜卧推（宽握）", "胸"], "chest-14": ["哑铃上斜卧推（窄握）", "胸"],
 	"back-01": ["引体向上", "背"], "back-02": ["杠铃划船", "背"], "back-03": ["高位下拉", "背"],
-	"back-04": ["坐姿划船", "背"], "back-05": ["正握下拉（宽握）", "背"], "back-06": ["反握下拉", "背"],
+	"back-04": ["坐姿划船", "背"], "back-05": ["高位下拉（对握）", "背"], "back-06": ["高位下拉（反握）", "背"],
 	"back-07": ["坐姿器械划船（中握）", "背"], "back-08": ["坐姿划船（宽握）", "背"], "back-09": ["坐姿划船（中握）", "背"],
 	"back-10": ["坐姿划船（窄握）", "背"], "back-11": ["杠铃划船(正握)", "背"], "back-12": ["杠铃划船(反握)", "背"],
 	"back-13": ["绳索面拉", "背"],
@@ -134,6 +134,7 @@ const SEED_NAMES = {
 	"shoulder-10": ["蝴蝶机（反向）", "肩"],
 	"arm-01": ["杠铃弯举", "手臂"], "arm-02": ["锤式弯举", "手臂"], "arm-03": ["绳索下压", "手臂"], "arm-04": ["坐姿绳索弯举", "手臂"],
 	"core-01": ["平板支撑", "核心"], "core-02": ["悬垂举腿", "核心"],
+	"core-03": ["龙门架卷腹", "核心"], "core-04": ["反向山羊挺身", "核心"],
 };
 
 // ===== 0. exercises vs seed 对比 =====
@@ -164,7 +165,7 @@ t("0. exercises 集合 vs seed 数据对比", () => {
 	console.log(`seed 预期条数: ${SEED_IDS.size}`);
 	console.log(`已带 type+bodyweight 新字段的: ${withNewFields.length}`);
 	if (missing.length > 0) console.log(`⚠ 云端缺失的 seed id (${missing.length}): ${missing.join(", ")}`);
-	else console.log("✓ 云端包含全部 52 条 seed 动作");
+	else console.log(`✓ 云端包含全部 ${SEED_IDS.size} 条 seed 动作`);
 	if (extra.length > 0) {
 		console.log(`⚠ 云端多出的动作 (${extra.length}):`);
 		for (const e of extra) console.log(`  ${e._id}  ${e.name}  category=${e.category ?? "?"}  ${e._openid ? "(自建)" : ""}`);
@@ -182,11 +183,11 @@ t("1. Legacy Workout (workouts collection)", () => {
 	console.log("总条数:", c.n);
 	if (c.n === 0) { console.log("(空)"); return; }
 
-	// 日期范围
-	const firstR = runCmd({ table: "workouts", body: { aggregate: "workouts", pipeline: [{ $sort: { date: 1 } }, { $limit: 1 }, { $project: { date: 1 } }], cursor: {} } });
-	const lastR = runCmd({ table: "workouts", body: { aggregate: "workouts", pipeline: [{ $sort: { date: -1 } }, { $limit: 1 }, { $project: { date: 1 } }], cursor: {} } });
-	const firstDate = firstR.ok ? firstR.data[0]?.date ?? "?" : "?";
-	const lastDate = lastR.ok ? lastR.data[0]?.date ?? "?" : "?";
+	// 日期范围（用 find + $sort + $limit 更可靠）
+	const firstR = runCmd({ table: "workouts", body: { find: "workouts", filter: {}, sort: { date: 1 }, limit: 1, projection: { date: 1 } } });
+	const lastR = runCmd({ table: "workouts", body: { find: "workouts", filter: {}, sort: { date: -1 }, limit: 1, projection: { date: 1 } } });
+	const firstDate = firstR.ok ? firstR.result?.[0]?.date ?? "?" : "?";
+	const lastDate = lastR.ok ? lastR.result?.[0]?.date ?? "?" : "?";
 	console.log("日期范围:", firstDate, "~", lastDate);
 
 	// 汇总

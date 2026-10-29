@@ -63,7 +63,7 @@
 </template>
 
 <script setup lang="uts">
-	import { parseDate } from '@/services/gym-stats.uts'
+	import { formatDate, parseDate } from '@/services/gym-stats.uts'
 	import {
 		EditSlot, SessionExercise, beginHistoryEdit, beginMakeupEdit, commitEdit, discardEdit, exerciseProgress, formatTarget,
 		markFilledSetsDone, peekEdit, saveEditSlotSession
@@ -113,22 +113,43 @@
 		const date = ((opts['date'] ?? '') as string)
 		const id = ((opts['id'] ?? '') as string)
 
+		console.log('[WE.onLoad] mode=' + mode + ' date=' + date + ' id=' + id)
+
+		// ★ 先确认参数合法：避免 openFresh 里 beginMakeupEdit 因 isValidDate/未来日期 直接返回 null 导致闪一下
+		if (mode == 'makeup') {
+			const todayStr = formatDate(new Date())
+			if (date == '') {
+				console.log('[WE.onLoad] date 为空 → goBack')
+				uni.showToast({ title: '日期缺失', icon: 'none' })
+				setTimeout(() => goBack(), 400)
+				return
+			}
+			if (date > todayStr) {
+				console.log('[WE.onLoad] date=' + date + ' > today=' + todayStr + ' → goBack')
+				uni.showToast({ title: '只能补记今天或过去的日期', icon: 'none' })
+				setTimeout(() => goBack(), 600)
+				return
+			}
+		}
+
 		const existing = peekEdit()
 		const matches = existing != null &&
 			((mode == 'makeup' && existing.mode == 'makeup' && existing.session.date == date) ||
 				(mode == 'edit' && existing.mode == 'edit' && existing.session.id == id))
+		console.log('[WE.onLoad] peekEdit=' + (existing != null ? (existing.mode + '/' + existing.session.date) : 'null') + ' matches=' + matches)
 		if (existing != null && !matches) {
-			// 有另一份未保存草稿：选择继续它，或放弃后开始新草稿
+			console.log('[WE.onLoad] existing 不匹配 → 弹 modal')
 			uni.showModal({
 				title: '有未保存的草稿',
 				content: '已存在' + slotLabel(existing) + '。可以继续它，或放弃后开始新的。',
-				confirmText: '继续该草稿',
-				cancelText: '放弃并开始',
+				confirmText: '继续草稿',
+				cancelText: '开始新的',
 				success: (res : ShowModalSuccess) => {
 					if (res.confirm) {
 						slot.value = existing
 						isMakeup.value = existing.mode == 'makeup'
 					} else {
+						console.log('[WE.onLoad] 用户选放弃 → discardEdit + openFresh')
 						discardEdit()
 						openFresh(mode, date, id)
 					}
@@ -137,6 +158,7 @@
 			})
 			return
 		}
+		console.log('[WE.onLoad] 直接 openFresh')
 		openFresh(mode, date, id)
 	})
 
@@ -144,23 +166,82 @@
 		let opened : EditSlot | null = null
 		if (mode == 'makeup') {
 			opened = beginMakeupEdit(date)
-			if (opened == null && peekEdit() == null) {
-				uni.showToast({ title: '只能补记今天或过去的日期', icon: 'none' })
-				setTimeout(() => goBack(), 600)
+			const peekAfter = peekEdit()
+			console.log('[WE.openFresh] beginMakeupEdit=' + (opened != null ? 'ok' : 'null') + ' peekAfter=' + (peekAfter != null ? (peekAfter.mode + '/' + peekAfter.session.date) : 'null'))
+			if (opened == null) {
+				if (peekAfter == null) {
+					console.log('[WE.openFresh] ★ opened==null && peek==null → 合法日期/未来日期检查失败 → goBack 闪一下！')
+					uni.showToast({ title: '日期无效或已是未来', icon: 'none' })
+					setTimeout(() => goBack(), 600)
+					return
+				}
+				// opened==null 但 peekAfter!=null → existing 不匹配（onLoad 应该已经拦截）
+				// 这里作为 double check：直接用 peekAfter 弹 modal 让用户选
+				console.log('[WE.openFresh] ★ opened==null 但 peekAfter!=null → existing 不匹配 → 弹 modal 兜底')
+				uni.showModal({
+					title: '有未保存的草稿',
+					content: '已存在' + slotLabel(peekAfter) + '。继续它，或放弃后开始新的？',
+					confirmText: '继续草稿',
+					cancelText: '开始新的',
+					success: (res : ShowModalSuccess) => {
+						if (res.confirm) {
+							slot.value = peekAfter
+							isMakeup.value = peekAfter.mode == 'makeup'
+						} else {
+							discardEdit()
+							opened = beginMakeupEdit(date)
+							if (opened == null) {
+								console.log('[WE.openFresh] 二次 beginMakeupEdit 还是 null → goBack')
+								goBack()
+								return
+							}
+							isMakeup.value = opened.mode == 'makeup'
+							slot.value = opened
+						}
+					},
+					fail: () => goBack()
+				})
 				return
 			}
 		} else if (mode == 'edit') {
 			opened = beginHistoryEdit(id)
-			if (opened == null && peekEdit() == null) {
-				uni.showToast({ title: '记录不存在或尚未结束，无法编辑', icon: 'none' })
-				setTimeout(() => goBack(), 600)
+			const peekAfter = peekEdit()
+			console.log('[WE.openFresh] beginHistoryEdit=' + (opened != null ? 'ok' : 'null') + ' peekAfter=' + (peekAfter != null ? peekAfter.mode : 'null'))
+			if (opened == null) {
+				if (peekAfter == null) {
+					uni.showToast({ title: '记录不存在或尚未结束，无法编辑', icon: 'none' })
+					setTimeout(() => goBack(), 600)
+					return
+				}
+				console.log('[WE.openFresh] opened==null 但 peekAfter!=null → 弹 modal 兜底')
+				uni.showModal({
+					title: '有未保存的草稿',
+					content: '已存在' + slotLabel(peekAfter) + '。继续它，或放弃后开始新的？',
+					confirmText: '继续草稿',
+					cancelText: '开始新的',
+					success: (res : ShowModalSuccess) => {
+						if (res.confirm) {
+							slot.value = peekAfter
+							isMakeup.value = peekAfter.mode == 'makeup'
+						} else {
+							discardEdit()
+							opened = beginHistoryEdit(id)
+							if (opened == null) { goBack(); return }
+							isMakeup.value = opened.mode == 'makeup'
+							slot.value = opened
+						}
+					},
+					fail: () => goBack()
+				})
 				return
 			}
 		}
 		if (opened == null) {
+			console.log('[WE.openFresh] 最后兜底 goBack')
 			goBack()
 			return
 		}
+		console.log('[WE.openFresh] ★ 成功 slot.value 已设置')
 		isMakeup.value = opened.mode == 'makeup'
 		slot.value = opened
 	}

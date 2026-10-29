@@ -132,8 +132,7 @@
 			</button>
 		</view>
 
-		<text class="start-hint" v-if="startHint !== ''">{{ startHint }}</text>
-		<button class="start-button" :class="{ 'is-continue': hasActive, 'has-hint': startHint !== '' }" @click="onStart">
+		<button class="start-button" :class="{ 'is-continue': hasActive }" @click="onStart">
 			<view class="start-button-icon">
 				<gym-icon name="plus-white" :size="22"></gym-icon>
 			</view>
@@ -151,8 +150,8 @@
 	import { Workout, calcStreak, formatDate, parseDate } from '@/services/gym-stats.uts'
 	import { loadWorkouts } from '@/services/gym-api.uts'
 	import { loadNickname } from '@/services/gym-nickname.uts'
-	import { WorkoutSession, SessionTotals, loadHistorySessions, loadSession, sessionHasFilledSets, sessionTotals } from '@/services/workout-session.uts'
-	import { PLAN_CONFLICT, PLAN_CONTINUE, StartPlan, planStart } from '@/services/workout-entry.uts'
+	import { WorkoutSession, SessionTotals, loadHistorySessions, loadSession, sessionHasContent, sessionTotals } from '@/services/workout-session.uts'
+	import { PLAN_CONTINUE, StartPlan, planStart } from '@/services/workout-entry.uts'
 	import {
 		CalendarCell, DayEntry, MonthRef, STATUS_ACTIVE, WeekProgress, activeDates, buildDayEntries, buildMonthCells,
 		calcWeekProgress, entriesOnDate, entryNote, entryTag, entryTitle, monthTrainedDays, nextWeekStart, shiftMonth,
@@ -260,14 +259,14 @@
 
 	// ---- 未结束的训练 ----
 	// 不会自动打开，只在首页卡片里展示
-	// 未结束训练卡片：只挑“有填写内容”的草稿，完全空白的草稿不占位置（开始新训练时会被清理）
+	// 未结束训练卡片：只挑“确实有内容”的草稿，空草稿不占位置（进入首页时会被清理）
 	const draft = computed(() : WorkoutSession | null => {
 		const cur = currentSession.value
 		let best : WorkoutSession | null = null
-		if (cur != null && cur.status == STATUS_ACTIVE && sessionHasFilledSets(cur)) best = cur
+		if (cur != null && cur.status == STATUS_ACTIVE && sessionHasContent(cur)) best = cur
 		for (let i = 0; i < historySessions.value.length; i++) {
 			const s = historySessions.value[i]
-			if (s.status != STATUS_ACTIVE || !sessionHasFilledSets(s)) continue
+			if (s.status != STATUS_ACTIVE || !sessionHasContent(s)) continue
 			if (best == null || s.startedAt > best.startedAt) best = s
 		}
 		return best
@@ -387,21 +386,15 @@
 	})
 
 	// ---- 开始 / 继续训练 ----
-	// 只由“今天”和草稿身份决定，日历选中日期不参与
-	const plan = computed(() : StartPlan => planStart(currentSession.value, historySessions.value, todayStr.value))
-	const hasActive = computed(() : boolean => plan.value.kind == PLAN_CONTINUE || plan.value.kind == PLAN_CONFLICT)
+	// 只由未结束草稿的实际内容决定，日历选中日期不参与
+	const plan = computed(() : StartPlan => planStart(currentSession.value, historySessions.value))
+	const hasActive = computed(() : boolean => plan.value.kind == PLAN_CONTINUE)
 	const startLabel = computed(() : string => {
-		if (plan.value.kind == PLAN_CONTINUE) return '继续训练'
-		if (plan.value.kind == PLAN_CONFLICT) return '未结束的训练 · ' + shortDate(plan.value.date) + '开始'
+		if (plan.value.kind == PLAN_CONTINUE) {
+			const d = plan.value.date
+			return '继续训练 · ' + (d == todayStr.value ? '今天' : shortDate(d))
+		}
 		return '开始今日训练 · ' + shortDate(todayStr.value)
-	})
-	const startHint = computed(() : string => {
-		let text = ''
-		if (selectedDate.value != todayStr.value) text = '当前查看的是 ' + shortDate(selectedDate.value) + '，仅用于浏览。'
-		if (plan.value.kind == PLAN_CONTINUE) return text + '将继续今天已开始的训练，不会新建。'
-		if (plan.value.kind == PLAN_CONFLICT) return text + '有一场 ' + shortDate(plan.value.date) + ' 开始的训练尚未结束，点击后可选择继续它，或保留它并开始今天的新训练。'
-		if (text != '') return text + '开始训练只会记录到今天（' + shortDate(todayStr.value) + '）。'
-		return ''
 	})
 
 	function onStart() {
@@ -412,6 +405,7 @@
 	const canMakeup = computed(() : boolean => selectedDate.value <= todayStr.value)
 
 	function onMakeup() {
+		console.log('[gym-dashboard] onMakeup selectedDate=' + selectedDate.value)
 		uni.navigateTo({ url: '/pages/workout-edit/workout-edit?mode=makeup&date=' + selectedDate.value })
 	}
 
@@ -1135,15 +1129,6 @@
 		background-color: #fafbfa;
 	}
 
-	.start-hint {
-		display: block;
-		margin-top: 22px;
-		color: #8d9691;
-		font-size: 12px;
-		line-height: 1.6;
-		text-align: center;
-	}
-
 	.start-button {
 		display: flex;
 		flex-direction: row;
@@ -1158,10 +1143,6 @@
 		color: #ffffff;
 		background-color: #1cba78;
 		font-weight: 700;
-	}
-
-	.start-button.has-hint {
-		margin-top: 10px;
 	}
 
 	.start-button.is-continue {

@@ -91,7 +91,7 @@
 	import { formatDate, parseDate } from '@/services/gym-stats.uts'
 	import {
 		SessionTotals, WorkoutSession, activateSession, exerciseProgress, exerciseVolume, finishSession, formatTarget,
-		loadSession, saveSession, sessionHasFilledSets, sessionTotals
+		loadSession, saveSession, sessionHasContent, sessionTotals
 	} from '@/services/workout-session.uts'
 	import { syncSessionToCloud } from '@/services/workout-adapter.uts'
 	import { confirmDialog } from '@/services/gym-dialog.uts'
@@ -252,7 +252,7 @@
 		if (t.workDone + t.warmupDone == 0) {
 			let title = '没有完成的组'
 			let content = '还没有完成任何一组，结束后不会产生训练记录，已填写的内容也会被清除。'
-			if (!sessionHasFilledSets(s)) {
+			if (!sessionHasContent(s)) {
 				// 完全空白：直接清理空草稿，不弹确认
 				title = ''
 				content = ''

@@ -84,7 +84,10 @@
 								<text class="rir-value">{{ row.rirText }}</text>
 							</button>
 						</view>
-						<text class="set-last" v-if="row.last !== ''">{{ row.last }}</text>
+						<view class="set-last-row" v-if="row.last !== ''">
+							<text class="set-last">{{ row.last }}</text>
+							<button class="set-fill" @click="fillFromLast(row.id)">一键填充</button>
+						</view>
 						<text class="set-error" v-if="errorSetId === row.id">{{ errorText }}</text>
 					</view>
 				</view>
@@ -138,6 +141,8 @@
 		rirSet : boolean
 		done : boolean
 		last : string
+		// 对应上次训练的第几个正式组（从 0 开始）；热身组或无记录时为 -1
+		lastIndex : number
 	}
 
 	type InputEventDetail = {
@@ -307,6 +312,7 @@
 			const warm = s.kind == KIND_WARMUP
 			let badge = ''
 			let last = ''
+			let lastIndex = -1
 			if (warm) {
 				warmNo++
 				badge = '热' + warmNo
@@ -314,6 +320,7 @@
 				workNo++
 				badge = '' + workNo
 				last = lastText(workNo - 1)
+				lastIndex = workNo - 1
 			}
 			out.push({
 				id: s.id,
@@ -324,7 +331,8 @@
 				rirText: rirLabel(s.rir, '—'),
 				rirSet: s.rir != RIR_UNSET,
 				done: s.done,
-				last: last
+				last: last,
+				lastIndex: lastIndex
 			} as SetRow)
 		}
 		return out
@@ -416,6 +424,25 @@
 		s.reps = e.detail.value
 		clearError(id)
 		schedulePersist()
+	}
+
+	// 把上次训练对应正式组的重量 / 次数填入当前组；上次的自重记录不填重量
+	function fillFromLast(id : string) {
+		const s = findSet(id)
+		if (s == null) return
+		let idx = -1
+		for (let i = 0; i < rows.value.length; i++) {
+			if (rows.value[i].id == id) {
+				idx = rows.value[i].lastIndex
+				break
+			}
+		}
+		if (idx < 0 || idx >= lastSets.value.length) return
+		const l = lastSets.value[idx]
+		s.weight = l.weight > 0 ? '' + l.weight : ''
+		s.reps = '' + l.reps
+		clearError(id)
+		persistNow()
 	}
 
 	function setKind(id : string, kind : string) {
@@ -1058,11 +1085,28 @@
 		line-height: 1.3;
 	}
 
-	.set-last {
-		display: block;
+	.set-last-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
 		margin-top: 8px;
+	}
+
+	.set-last {
 		color: #8d9691;
 		font-size: 12px;
+	}
+
+	.set-fill {
+		margin: 0;
+		padding: 4px 0 4px 12px;
+		border-width: 0;
+		color: #1c8f5e;
+		background-color: transparent;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 1.4;
 	}
 
 	.set-error {

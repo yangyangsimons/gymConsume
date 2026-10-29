@@ -1,5 +1,7 @@
 <template>
-	<view class="app-shell">
+	<page-meta page-style="height: auto; min-height: 100%; display: block; overflow: visible;"></page-meta>
+	<view class="app-shell analytics-page">
+		<view class="analytics-top-cover"></view>
 		<gym-analytics></gym-analytics>
 	</view>
 </template>
@@ -13,4 +15,20 @@
 
 <style lang="scss">
 	@import "@/styles/page-layout.scss";
+
+	.analytics-page {
+		height: auto;
+		min-height: 100%;
+		overflow: visible;
+	}
+
+	.analytics-top-cover {
+		position: fixed;
+		z-index: 20;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: calc(var(--status-bar-height, 20px) + 44px);
+		background-color: $gym-bg-page;
+	}
 </style>

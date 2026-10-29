@@ -1,0 +1,75 @@
+[自检通过] 共 52 条：复合 34 / 孤立 18 / 自重 4 / 弃用 1
+
+[DRY RUN 模式] 共 6 批，每批 10 条（最后一批 2 条）
+
+=== 批次 1/6 (10 条) ===
+  [$set]   args: ["C:\\nvm4w\\nodejs\\node_modules\\@cloudbase\\cli\\bin\\tcb","db","nosql","execute","-e","cloud1-d0gjxp9f1819c8c1e","--json","--command","[{\"TableName\":\"exercises\",\"CommandType\":\"UPDATE\",\"Co... (2157 chars)
+    chest-01  杠铃卧推            胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    chest-02  上斜哑铃卧推          胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    chest-03  绳索夹胸            胸/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    chest-04  双杠臂屈伸           胸/复合/true  →  $set { type="复合", bodyweight=true, deprecated=false, aliasId="" }
+    chest-05  上斜卧推            胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    chest-06  史密斯卧推           胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    chest-07  史密斯上斜卧推         胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    chest-08  哑铃卧推            胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    chest-09  器械平板卧推          胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    chest-10  器械上斜卧推          胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+
+=== 批次 2/6 (10 条) ===
+  [$set]   args: ["C:\\nvm4w\\nodejs\\node_modules\\@cloudbase\\cli\\bin\\tcb","db","nosql","execute","-e","cloud1-d0gjxp9f1819c8c1e","--json","--command","[{\"TableName\":\"exercises\",\"CommandType\":\"UPDATE\",\"Co... (2149 chars)
+    chest-11  坐姿推胸机           胸/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    chest-12  蝴蝶机夹胸           胸/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    back-01  引体向上            背/复合/true  →  $set { type="复合", bodyweight=true, deprecated=false, aliasId="" }
+    back-02  杠铃划船            背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-03  高位下拉            背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-04  坐姿划船            背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-05  正握下拉（宽握）        背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-06  反握下拉            背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-07  坐姿器械划船（中握）      背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-08  坐姿划船（宽握）        背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+
+=== 批次 3/6 (10 条) ===
+  [$set]   args: ["C:\\nvm4w\\nodejs\\node_modules\\@cloudbase\\cli\\bin\\tcb","db","nosql","execute","-e","cloud1-d0gjxp9f1819c8c1e","--json","--command","[{\"TableName\":\"exercises\",\"CommandType\":\"UPDATE\",\"Co... (2148 chars)
+    back-09  坐姿划船（中握）        背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-10  坐姿划船（窄握）        背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-11  杠铃划船(正握)        背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-12  杠铃划船(反握)        背/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    back-13  绳索面拉            背/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    legs-01  杠铃深蹲            腿/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    legs-02  罗马尼亚硬拉          腿/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    legs-03  腿举              腿/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    legs-04  腿弯举             腿/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    legs-05  史密斯深蹲           腿/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+
+=== 批次 4/6 (10 条) ===
+  [$set]   args: ["C:\\nvm4w\\nodejs\\node_modules\\@cloudbase\\cli\\bin\\tcb","db","nosql","execute","-e","cloud1-d0gjxp9f1819c8c1e","--json","--command","[{\"TableName\":\"exercises\",\"CommandType\":\"UPDATE\",\"Co... (2170 chars)
+    legs-06  坐姿腿屈伸           腿/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    legs-07  坐姿腿推机           腿/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    legs-08  哈克深蹲            腿/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    legs-09  哈克深蹲（反向）        腿/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    legs-10  髋内收训练机(外展)      腿/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    legs-11  髋内收训练机(内收)      腿/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    shoulder-01  杠铃推举            肩/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    shoulder-02  哑铃侧平举           肩/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    shoulder-03  面拉              肩/孤立/false  ⚠弃用→back-13  →  $set { type="孤立", bodyweight=false, deprecated=true, aliasId="back-13" }
+    shoulder-04  史密斯推举           肩/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+
+=== 批次 5/6 (10 条) ===
+  [$set]   args: ["C:\\nvm4w\\nodejs\\node_modules\\@cloudbase\\cli\\bin\\tcb","db","nosql","execute","-e","cloud1-d0gjxp9f1819c8c1e","--json","--command","[{\"TableName\":\"exercises\",\"CommandType\":\"UPDATE\",\"Co... (2168 chars)
+    shoulder-05  器械肩上推举（对握）      肩/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    shoulder-06  器械肩上推举（正握）      肩/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    shoulder-07  哑铃推举            肩/复合/false  →  $set { type="复合", bodyweight=false, deprecated=false, aliasId="" }
+    shoulder-08  哑铃侧平举（反握）       肩/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    shoulder-09  绳索侧平举           肩/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    shoulder-10  蝴蝶机（反向）         肩/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    arm-01  杠铃弯举            手臂/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    arm-02  锤式弯举            手臂/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    arm-03  绳索下压            手臂/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+    arm-04  坐姿绳索弯举          手臂/孤立/false  →  $set { type="孤立", bodyweight=false, deprecated=false, aliasId="" }
+
+=== 批次 6/6 (2 条) ===
+  [$set]   args: ["C:\\nvm4w\\nodejs\\node_modules\\@cloudbase\\cli\\bin\\tcb","db","nosql","execute","-e","cloud1-d0gjxp9f1819c8c1e","--json","--command","[{\"TableName\":\"exercises\",\"CommandType\":\"UPDATE\",\"Co... (642 chars)
+    core-01  平板支撑            核心/孤立/true  →  $set { type="孤立", bodyweight=true, deprecated=false, aliasId="" }
+    core-02  悬垂举腿            核心/孤立/true  →  $set { type="孤立", bodyweight=true, deprecated=false, aliasId="" }
+
+[DRY RUN 完成] 未实际执行任何 tcb 命令。

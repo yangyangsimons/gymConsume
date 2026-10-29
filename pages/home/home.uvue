@@ -5,13 +5,12 @@
 </template>
 
 <script setup lang="uts">
-	import { formatDate } from '@/services/gym-stats.uts'
 	import {
-		WorkoutSession, activateSession, clearSession, createSession, finishSession, loadHistorySessions, loadSession,
-		sessionHasCompletedSets, sessionHasFilledSets, sessionTotals
+		WorkoutSession, activateSession, createSession, finishSession, loadHistorySessions, loadSession,
+		pruneEmptyDrafts, sessionHasCompletedSets, sessionHasContent, sessionTotals
 	} from '@/services/workout-session.uts'
 	import { syncSessionToCloud } from '@/services/workout-adapter.uts'
-	import { PLAN_CONFLICT, PLAN_CONTINUE, PLAN_FAILED_LAST, planStart } from '@/services/workout-entry.uts'
+	import { PLAN_CONTINUE, planStart } from '@/services/workout-entry.uts'
 	import { confirmDialog } from '@/services/gym-dialog.uts'
 
 	function openWorkout(id : string) {
@@ -109,7 +108,7 @@
 			return
 		}
 		if (!sessionHasCompletedSets(s)) {
-			if (!sessionHasFilledSets(s)) {
+			if (!sessionHasContent(s)) {
 				showFinishResult(await performFinish(id))
 				return
 			}
@@ -124,7 +123,7 @@
 		const t = sessionTotals(s)
 		let content = '本次已完成 ' + t.workDone + ' 个正式组。'
 		if (t.unfinished > 0) content = '还有 ' + t.unfinished + ' 个组未完成，结束后只统计已完成的组。'
-		const ok = await confirmDialog('结束并保存？', content, '结束并保存', '返回填写')
+		const ok = await confirmDialog('结束并保存？', content, '结束保存', '返回填写')
 		if (!ok) {
 			openWorkout(id)
 			return
@@ -132,67 +131,24 @@
 		showFinishResult(await performFinish(id))
 	}
 
-	// 开始 / 继续训练。日期与草稿状态在点击时重新读取，不依赖页面上已渲染的文案
+	// 开始 / 继续训练。草稿状态在点击时重新读取，不依赖页面上已渲染的文案。
+	// - 没有有效草稿：直接新建；
+	// - 有有效草稿：简短确认“继续原记录 / 另开一场”，另开时旧记录保留在本机历史。
 	async function startFlow() {
-		const today = formatDate(new Date())
-		const plan = planStart(loadSession(), loadHistorySessions(), today)
+		const plan = planStart(loadSession(), loadHistorySessions())
 		if (plan.kind == PLAN_CONTINUE) {
-			openWorkout(plan.sessionId)
-			return
-		}
-		if (plan.kind == PLAN_FAILED_LAST) {
-			const viewLast = await confirmDialog('上次训练未提交', '上次结束的训练提交云端失败，记录仍保存在本机。要先查看并重试吗？选择“新训练”不会删除本机记录。', '查看重试', '新训练')
-			if (viewLast) {
-				openWorkout(plan.sessionId)
-				return
-			}
-			// 弹窗期间可能跨日或状态变化，重新决策一次
-			const again = planStart(loadSession(), loadHistorySessions(), formatDate(new Date()))
-			if (again.kind == PLAN_CONTINUE) {
-				openWorkout(again.sessionId)
-				return
-			}
-			startToday()
-			return
-		}
-		if (plan.kind == PLAN_CONFLICT) {
 			const old = sessionById(plan.sessionId)
-			if (old == null) {
+			// 决策后草稿可能已被清理或状态变化，按无草稿处理
+			if (old == null || old.status != 'active' || !sessionHasContent(old)) {
 				startToday()
 				return
 			}
-			// 空草稿：直接清理，不打扰用户，也不产生统计
-			if (!sessionHasCompletedSets(old) && !sessionHasFilledSets(old)) {
-				const cur = ensureCurrent(old.id)
-				if (cur != null) clearSession()
-				startToday()
-				return
-			}
-			// 只有填写内容、没有完成组：必须明确确认，不能静默覆盖
-			if (!sessionHasCompletedSets(old)) {
-				const discard = await confirmDialog('有未完成的草稿', shortDate(old.date) + ' 开始的一场训练只有填写内容，还没有完成组。放弃它并开始今天的新训练吗？原内容会被清除。', '放弃并开始新的', '返回继续填写')
-				if (!discard) {
-					openWorkout(old.id)
-					return
-				}
-				const cur = ensureCurrent(old.id)
-				if (cur != null) clearSession()
-				startToday()
-				return
-			}
-			// 已有完成组：结束后归档，再开始今天的新训练
-			const finishOld = await confirmDialog('有未结束的训练', shortDate(old.date) + ' 开始的训练还有已完成组，尚未计入统计。要先结束并保存它，再开始今天的新训练吗？', '结束并开始新的', '返回上一场')
-			if (!finishOld) {
+			// 按钮文案必须 ≤4 个汉字，否则微信 showModal 会直接走 fail
+			const keep = await confirmDialog('有未结束的训练', shortDate(old.date) + ' 开始的训练还有填写内容。要继续原来的记录，还是另开一场新的？', '继续记录', '另开一场')
+			if (keep) {
 				openWorkout(old.id)
 				return
 			}
-			const r = await performFinish(old.id)
-			if (r == 'stale' || r == 'missing') {
-				showFinishResult(r)
-				return
-			}
-			startToday()
-			return
 		}
 		startToday()
 	}
@@ -203,8 +159,10 @@
 		openWorkout(id)
 	}
 
-	// 从训练页返回、从后台回到前台（含跨日）后，让首页重新读取日期和训练状态
+	// 从训练页返回、从后台回到前台（含跨日）后，让首页重新读取日期和训练状态。
+	// 顺手清理没有内容的空草稿，避免它被误判为“继续训练”。
 	onShow(() => {
+		pruneEmptyDrafts()
 		uni.$emit('workout-session-changed')
 	})
 </script>
