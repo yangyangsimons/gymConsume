@@ -1,6 +1,6 @@
 <template>
 	<view class="dash-root">
-		<scroll-view class="app-content" scroll-y="true">
+		<scroll-view :show-scrollbar="false" class="app-content" scroll-y="true">
 		<view class="topbar">
 			<view>
 				<text class="eyebrow">{{ dateLabel }}</text>
@@ -312,10 +312,12 @@
 	const monthKicker = computed(() : string => monthNames[viewMonth.value.month] + ' ' + viewMonth.value.year)
 	const calendarCells = computed(() : CalendarCell[] => buildMonthCells(viewMonth.value.year, viewMonth.value.month, todayStr.value, selectedDate.value, trained.value, activeDays.value))
 
-	const monthDays = computed(() : number => monthTrainedDays(trained.value, viewMonth.value.year, viewMonth.value.month))
+	// 本月与上月同期比较（上月 1 号至与今天相同的日期）；查看过去的月份时按整月比较
+	const compareUpToDay = computed(() : number => monthOffset.value == 0 ? parseDate(todayStr.value).getDate() : 0)
+	const monthDays = computed(() : number => monthTrainedDays(trained.value, viewMonth.value.year, viewMonth.value.month, compareUpToDay.value))
 	const prevMonthDays = computed(() : number => {
 		const p = shiftMonth(viewMonth.value.year, viewMonth.value.month, -1)
-		return monthTrainedDays(trained.value, p.year, p.month)
+		return monthTrainedDays(trained.value, p.year, p.month, compareUpToDay.value)
 	})
 	const monthDaysLabel = computed(() : string => (monthOffset.value == 0 ? '本月' : (viewMonth.value.month + 1) + '月') + '已训练 ' + monthDays.value + ' 天')
 	const hasPrevMonth = computed(() : boolean => prevMonthDays.value > 0)

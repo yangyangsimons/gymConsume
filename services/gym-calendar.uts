@@ -272,10 +272,12 @@ export function shiftMonth(year : number, month : number, delta : number) : Mont
 	return { year: d.getFullYear(), month: d.getMonth() } as MonthRef
 }
 
-export function monthTrainedDays(trained : Map<string, number>, year : number, month : number) : number {
+// upToDay > 0 时只统计 1 号到该日（超过当月天数按整月），用于“截至今天”的同期环比
+export function monthTrainedDays(trained : Map<string, number>, year : number, month : number, upToDay : number = 0) : number {
 	const dim = new Date(year, month + 1, 0).getDate()
+	const last = upToDay > 0 && upToDay < dim ? upToDay : dim
 	let n = 0
-	for (let day = 1; day <= dim; day++) {
+	for (let day = 1; day <= last; day++) {
 		if (trained.has(formatDate(new Date(year, month, day)))) n++
 	}
 	return n

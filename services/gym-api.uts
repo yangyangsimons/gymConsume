@@ -1,5 +1,5 @@
 import { Exercise, Workout } from './gym-stats.uts'
-import { cloudRows } from './gym-cloud.uts'
+import { cloudOwner, cloudRows } from './gym-cloud.uts'
 
 type ReadReply = {
 	ok : boolean
@@ -23,16 +23,60 @@ async function fetchAll(action : string) : Promise<UTSJSONObject[]> {
 	}
 }
 
-export async function loadExercises() : Promise<Exercise[]> {
-	const rows = await fetchAll('library')
-	const out : Exercise[] = []
-	for (let i = 0; i < rows.length; i++) out.push(rows[i] as Exercise)
+// 动作库按账号缓存：先用缓存秒开，再后台刷新；同一时间只发一组云端请求
+const LIBRARY_PREFIX = 'gymConsume.exerciseLibrary.v1.'
+let libraryOwner = ''
+let libraryMemory : Exercise[] | null = null
+let libraryLoading : Promise<Exercise[]> | null = null
+
+function libraryKey() : string {
+	const o = cloudOwner()
+	return LIBRARY_PREFIX + (o == '' ? 'unbound' : o)
+}
+
+function withCustom(base : Exercise[]) : Exercise[] {
+	const out : Exercise[] = base.slice()
 	const custom = cloudRows('exercise')
 	for (let i = 0; i < custom.length; i++) {
 		const ex = custom[i].value as Exercise
 		if (ex != null && !out.some((e : Exercise) : boolean => e._id == ex._id)) out.push(ex)
 	}
 	return out
+}
+
+export function cachedExercises() : Exercise[] | null {
+	const key = libraryKey()
+	if (libraryMemory == null || libraryOwner != key) {
+		libraryMemory = null
+		libraryOwner = key
+		try {
+			const raw = uni.getStorageSync(key)
+			if (typeof raw == 'string' && raw != '') libraryMemory = JSON.parse(raw) as Exercise[]
+		} catch (e) {
+			console.error('Exercise library cache could not be read', e)
+		}
+	}
+	return libraryMemory == null ? null : withCustom(libraryMemory!)
+}
+
+export function loadExercises() : Promise<Exercise[]> {
+	if (libraryLoading != null) return libraryLoading!
+	const key = libraryKey()
+	const task = fetchAll('library').then((rows : UTSJSONObject[]) : Exercise[] => {
+		const base : Exercise[] = []
+		for (let i = 0; i < rows.length; i++) base.push(rows[i] as Exercise)
+		libraryOwner = key
+		libraryMemory = base
+		try {
+			uni.setStorageSync(key, JSON.stringify(base))
+		} catch (e) {
+			console.error('Exercise library cache could not be saved', e)
+		}
+		return withCustom(base)
+	})
+	libraryLoading = task
+	task.then(() => { libraryLoading = null }, () => { libraryLoading = null })
+	return task
 }
 
 // Legacy cloud records are read only and scoped by trusted OPENID in gymData.

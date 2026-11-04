@@ -14,6 +14,8 @@ type PendingWrite = {
 	revision : number
 	removed : boolean
 	error : string
+	// 已发出但未收到确认的写入（规范化后的内容），用于识别“云端已写入、回包丢失”造成的假冲突
+	attempts ?: string[]
 }
 type CloudState = {
 	rows : CloudRow[]
@@ -37,6 +39,51 @@ let refreshing : Promise<void> | null = null
 let state : CloudState = { rows: [], pending: [] }
 let ownChains : OwnRevisionChain[] = []
 let readVersions = new Map<string, number>()
+let retryTimer = -1
+let retryDelay = 5000
+let retryNeedsRefresh = false
+let foreground = true
+let lastRefreshAt = 0
+
+function retryable(p : PendingWrite) : boolean {
+	return p.error != 'CONFLICT' && !(p.error ?? '').startsWith('INVALID_')
+}
+
+function scheduleRetry(refreshNeeded : boolean = false) {
+	retryNeedsRefresh = retryNeedsRefresh || refreshNeeded
+	if (!foreground || retryTimer != -1) return
+	if (!retryNeedsRefresh && !state.pending.some((p : PendingWrite) : boolean => retryable(p))) return
+	retryTimer = setTimeout(() => {
+		retryTimer = -1
+		const refreshNeeded = retryNeedsRefresh || !ready
+		retryNeedsRefresh = false
+		const task = refreshNeeded ? refreshCloudData() : flushCloud()
+		task.catch((e : unknown) => console.error('Automatic sync retry failed; local journal retained', e))
+	}, retryDelay)
+	retryDelay = Math.min(60000, retryDelay * 2)
+}
+
+function resetRetry() {
+	if (retryTimer != -1) clearTimeout(retryTimer)
+	retryTimer = -1
+	retryDelay = 5000
+	retryNeedsRefresh = false
+}
+
+export function resumeCloudSync(networkRecovery : boolean = false) : Promise<void> {
+	if (networkRecovery && !foreground) return Promise.resolve()
+	foreground = true
+	resetRetry()
+	if (refreshing != null) return refreshing!
+	if (!ready || lastRefreshAt == 0 || Date.now() - lastRefreshAt >= 30000) return refreshCloudData()
+	return flushCloud()
+}
+
+export function pauseCloudSync() {
+	foreground = false
+	if (retryTimer != -1) clearTimeout(retryTimer)
+	retryTimer = -1
+}
 
 function storageError(e : unknown) {
 	console.error('Cloud local journal failed', e)
@@ -69,11 +116,19 @@ function restore() {
 }
 restore()
 
+type CloudFailure = { message ?: string, errMsg ?: string }
+
 export async function callGymCloud(data : UTSJSONObject) : Promise<CloudReply> {
-	const result = await wx.cloud.callFunction({ name: 'gymData', data: data })
-	const reply = result.result as CloudReply
-	if (reply == null || reply.ok != true) throw new Error(reply?.code ?? 'INVALID_CLOUD_RESPONSE')
-	return reply
+	try {
+		const result = await wx.cloud.callFunction({ name: 'gymData', data: data })
+		const reply = result.result as CloudReply
+		if (reply == null || reply.ok != true) throw new Error(reply?.code ?? 'INVALID_CLOUD_RESPONSE')
+		return reply
+	} catch (e) {
+		// 真机云调用可能拒绝为 { errMsg }，而不是 Error；队列必须持久化可读的失败原因。
+		const failure = e as CloudFailure | null
+		throw new Error(failure?.message ?? failure?.errMsg ?? 'CLOUD_REQUEST_FAILED')
+	}
 }
 
 function pendingFor(kind : string, id : string) : PendingWrite | null {
@@ -107,6 +162,10 @@ export function cloudValue(kind : string, id : string) : UTSJSONObject | null {
 	return row == null || row.deleted ? null : row.value
 }
 
+export function cloudOwner() : string {
+	return owner
+}
+
 export function cloudRows(kind : string) : CloudRow[] {
 	return state.rows.filter((r : CloudRow) : boolean => r.kind == kind && !r.deleted && pendingFor(kind, r.id) == null)
 }
@@ -131,7 +190,8 @@ export function queueCloud(kind : string, id : string, json : string, removed : 
 	const next : PendingWrite = {
 		kind: kind, id: id, json: json, removed: removed,
 		revision: old != null ? old.revision : revision,
-		error: old?.error == 'CONFLICT' ? 'CONFLICT' : ''
+		error: old?.error == 'CONFLICT' ? 'CONFLICT' : '',
+		attempts: old?.attempts ?? []
 	}
 	state.pending = state.pending.filter((p : PendingWrite) : boolean => p.kind != kind || p.id != id)
 	state.pending.push(next)
@@ -139,6 +199,7 @@ export function queueCloud(kind : string, id : string, json : string, removed : 
 	persist()
 	uni.$emit('cloud-sync-changed')
 	if (timer != -1) clearTimeout(timer)
+	if (retryTimer != -1 || !foreground) return
 	timer = setTimeout(() => {
 		timer = -1
 		flushCloud().catch((e : unknown) => console.error('Draft sync failed; retained locally', e))
@@ -150,12 +211,86 @@ function replaceRow(row : CloudRow) {
 	state.rows.push(row)
 }
 
+function payloadText(json : string, removed : boolean) : string {
+	return removed ? 'null' : JSON.stringify(JSON.parse(json))
+}
+
+function rowText(row : CloudRow) : string {
+	return row.deleted ? 'null' : JSON.stringify(row.value)
+}
+
+function extendOwnChain(kind : string, id : string, base : number, to : number) {
+	const chain = ownChains.find((c : OwnRevisionChain) : boolean => c.kind == kind && c.id == id)
+	const from = chain != null && chain.to == base ? chain.from : base
+	ownChains = ownChains.filter((c : OwnRevisionChain) : boolean => c.kind != kind || c.id != id)
+	ownChains.push({ kind: kind, id: id, from: from, to: to })
+}
+
+// 版本冲突时判断云端当前版本是否其实就是本机的写入：
+// done = 云端内容已与待写入内容一致；rebase = 本机此前发出的写入已落库（只是没收到回包），在其之上继续写；
+// conflict = 确实是其他来源的修改，保留给用户决定
+function classifyConflict(p : PendingWrite, row : CloudRow | null) : string {
+	if (row == null) return 'conflict'
+	const remote = rowText(row)
+	if (remote == payloadText(p.json, p.removed)) return 'done'
+	const attempts = p.attempts ?? []
+	if (row.revision == p.revision + 1 && attempts.includes(remote)) return 'rebase'
+	return 'conflict'
+}
+
+function applyResolution(p : PendingWrite, row : CloudRow, outcome : string) {
+	extendOwnChain(p.kind, p.id, p.revision, row.revision)
+	replaceRow(row)
+	if (outcome == 'done') {
+		state.pending = state.pending.filter((x : PendingWrite) : boolean => x !== p)
+	} else {
+		p.revision = row.revision
+		p.attempts = []
+		p.error = ''
+	}
+}
+
+async function recoverConflict(kind : string, id : string) : Promise<string> {
+	const reply = await callGymCloud({ action: 'get', kind: kind, id: id })
+	const latest = pendingFor(kind, id)
+	if (latest == null) return 'done'
+	const row = reply.row ?? null
+	const outcome = classifyConflict(latest, row)
+	if (outcome != 'conflict') {
+		applyResolution(latest, row!, outcome)
+		persist()
+	}
+	return outcome
+}
+
+// 刷新拿到云端最新数据后，自动消解可以证明“并非真冲突”的旧冲突记录
+function settleConflicts() {
+	const conflicts = state.pending.filter((p : PendingWrite) : boolean => p.error == 'CONFLICT')
+	for (let i = 0; i < conflicts.length; i++) {
+		const p = conflicts[i]
+		const row = rowFor(p.kind, p.id)
+		const outcome = classifyConflict(p, row)
+		if (outcome != 'conflict') applyResolution(p, row!, outcome)
+	}
+}
+
+// 单条写入失败不阻塞队列里的其他数据：本轮跳过失败项继续发送，最后再抛出第一个错误
 async function sendPending() : Promise<void> {
-	if (!ready) return
+	if (!ready) throw new Error('CLOUD_NOT_CONNECTED')
+	const failedKeys : string[] = []
+	const recovered : string[] = []
+	let firstError : unknown | null = null
 	while (true) {
-		const next = state.pending.find((p : PendingWrite) : boolean => p.error != 'CONFLICT')
+		const next = state.pending.find((p : PendingWrite) : boolean => retryable(p) && !failedKeys.includes(p.kind + ':' + p.id))
 		if (next == null) break
+		const key = next.kind + ':' + next.id
 		const p = { ...next } as PendingWrite
+		const sent = payloadText(p.json, p.removed)
+		const attempts = (next.attempts ?? []).filter((a : string) : boolean => a != sent)
+		attempts.push(sent)
+		next.attempts = attempts.length > 5 ? attempts.slice(attempts.length - 5) : attempts
+		p.attempts = next.attempts
+		persist()
 		try {
 			const reply = await callGymCloud({
 				action: p.removed ? 'remove' : 'put', kind: p.kind, id: p.id,
@@ -173,21 +308,37 @@ async function sendPending() : Promise<void> {
 					state.pending = state.pending.filter((x : PendingWrite) : boolean => x !== latest)
 				} else {
 					latest.revision = row.revision
+					latest.attempts = []
 				}
 			}
 			persist()
 			uni.$emit('workout-saved')
 		} catch (e) {
-			console.error('Cloud sync failed', e)
+			let error : unknown = e
+			if ((e as Error).message == 'CONFLICT' && !recovered.includes(key)) {
+				// 每个数据每轮最多自动修复一次，避免异常情况下反复重试
+				recovered.push(key)
+				try {
+					if (await recoverConflict(p.kind, p.id) != 'conflict') {
+						uni.$emit('workout-saved')
+						continue
+					}
+				} catch (recoverError) {
+					error = recoverError
+				}
+			}
+			console.error('Cloud sync failed', error)
 			const latest = pendingFor(p.kind, p.id)
-			if (latest != null) latest.error = (e as Error).message
+			if (latest != null) latest.error = (error as Error).message
+			failedKeys.push(key)
+			if (firstError == null) firstError = error
 			persist()
 			uni.$emit('cloud-sync-changed')
-			throw e
 		}
 	}
 	uni.$emit('cloud-sync-changed')
-	if (state.pending.some((p : PendingWrite) : boolean => p.error == '')) {
+	if (firstError != null) throw firstError!
+	if (foreground && state.pending.some((p : PendingWrite) : boolean => p.error == '')) {
 		timer = setTimeout(() => {
 			timer = -1
 			flushCloud().catch((e : unknown) => console.error('Queued sync retained locally', e))
@@ -197,18 +348,33 @@ async function sendPending() : Promise<void> {
 
 export function flushCloud() : Promise<void> {
 	if (timer != -1) { clearTimeout(timer); timer = -1 }
+	if (refreshing != null) return refreshing!
+	if (!ready) return refreshCloudData()
 	if (running != null) return running!
 	const task = sendPending()
 	running = task
-	task.then(() => { running = null }).catch(() => { running = null })
+	task.then(() => {
+		running = null
+		resetRetry()
+	}).catch((e : unknown) => {
+		running = null
+		console.error('Cloud writes pending; local journal retained', e)
+		scheduleRetry()
+	})
 	return task
 }
 
 async function refresh() : Promise<void> {
-	ready = false
 	if (running != null) await running!.catch((e : unknown) => console.error('Previous sync retained for retry', e))
-	const identity = await callGymCloud({ action: 'identity' })
-	const nextOwner = identity.owner!
+	let nextOwner = ''
+	try {
+		const identity = await callGymCloud({ action: 'identity' })
+		if (identity.owner == null || identity.owner == '') throw new Error('INVALID_CLOUD_IDENTITY')
+		nextOwner = identity.owner
+	} catch (e) {
+		ready = false
+		throw e
+	}
 	if (owner != nextOwner) {
 		ownChains = []
 		readVersions = new Map<string, number>()
@@ -238,20 +404,30 @@ async function refresh() : Promise<void> {
 		rows.push(created.row!)
 	}
 	state.rows = rows
+	settleConflicts()
 	persist()
 	uni.$emit('workout-saved')
-	await flushCloud()
+	lastRefreshAt = Date.now()
 }
 
 export function refreshCloudData() : Promise<void> {
 	if (refreshing != null) return refreshing!
-	const task = refresh()
+	if (timer != -1) { clearTimeout(timer); timer = -1 }
+	let loaded = false
+	const task = refresh().then(() => {
+		loaded = true
+		return sendPending()
+	})
 	refreshing = task
-	task.then(() => { refreshing = null }).catch((e : unknown) => {
+	task.then(() => {
 		refreshing = null
-		ready = false
+		resetRetry()
+		uni.$emit('cloud-sync-changed')
+	}).catch((e : unknown) => {
+		refreshing = null
 		console.error('Cloud refresh failed; using retained local data', e)
-		uni.showToast({ title: '云端未连接，数据保留在本机', icon: 'none' })
+		scheduleRetry(!loaded)
+		uni.$emit('cloud-sync-changed')
 	})
 	return task
 }
@@ -269,11 +445,19 @@ export async function retryCloud(kind : string, id : string) : Promise<void> {
 		pending.revision = rowFor(kind, id)?.revision ?? 0
 		pending.error = ''
 		persist()
+	} else if (pending != null && !retryable(pending)) {
+		pending.error = ''
+		persist()
 	}
 	await flushCloud()
 }
 
 export async function retryAllCloud() : Promise<void> {
+	for (let i = 0; i < state.pending.length; i++) {
+		const p = state.pending[i]
+		if (p.error != 'CONFLICT') p.error = ''
+	}
+	persist()
 	await refreshCloudData()
 	const conflicts = state.pending.filter((p : PendingWrite) : boolean => p.error == 'CONFLICT')
 	for (let i = 0; i < conflicts.length; i++) await retryCloud(conflicts[i].kind, conflicts[i].id)

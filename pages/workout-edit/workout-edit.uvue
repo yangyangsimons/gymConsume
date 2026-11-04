@@ -1,6 +1,6 @@
 <template>
 	<view class="we-page">
-		<scroll-view class="we-scroll" scroll-y="true">
+		<scroll-view :show-scrollbar="false" class="we-scroll" scroll-y="true">
 			<view class="we-content" v-if="slot != null">
 				<view class="we-head">
 					<view class="we-head-top">
@@ -336,13 +336,8 @@
 			uni.showToast({ title: '原记录已变化或保存失败，请重试', icon: 'none' })
 			return
 		}
-		try {
-			await flushCloud()
-			uni.showToast({ title: '已保存', icon: 'none' })
-		} catch (e) {
-			console.error('Record saved locally; cloud retry required', e)
-			uni.showToast({ title: '已保存到本机，云端同步待重试', icon: 'none' })
-		}
+		uni.showToast({ title: '已保存到本机', icon: 'none' })
+		flushCloud().catch((e : unknown) => console.error('Record saved locally; automatic cloud retry pending', e))
 		goBack()
 	}
 

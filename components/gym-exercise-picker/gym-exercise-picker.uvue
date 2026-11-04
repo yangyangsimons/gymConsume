@@ -12,7 +12,7 @@
 				<gym-icon name="search-muted-light" :size="19"></gym-icon>
 				<input class="xp-input" placeholder="搜索动作名称、部位或拼音" :value="keyword" @input="onInput" />
 			</view>
-			<scroll-view class="xp-list" scroll-y="true">
+			<scroll-view :show-scrollbar="false" class="xp-list" scroll-y="true">
 				<text class="xp-empty" v-if="rows.length === 0">没有找到动作</text>
 				<view v-for="row in rows" :key="row.key">
 					<text class="xp-group" v-if="row.header !== ''">{{ row.header }}</text>

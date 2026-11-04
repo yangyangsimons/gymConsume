@@ -11,7 +11,7 @@
 					<gym-icon name="close-muted" :size="18"></gym-icon>
 				</button>
 			</view>
-			<scroll-view class="te-body" scroll-y="true">
+			<scroll-view :show-scrollbar="false" class="te-body" scroll-y="true">
 				<text class="te-note">仅修改本次训练的目标，不会改动已填写的组。</text>
 
 				<view class="te-field">

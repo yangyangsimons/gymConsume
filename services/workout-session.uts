@@ -449,6 +449,23 @@ function remoteSessions() : WorkoutSession[] {
 	return out
 }
 
+function clearInvalidDone(ex : SessionExercise) {
+	for (let i = 0; i < ex.sets.length; i++) {
+		const set = ex.sets[i]
+		if (set.done && validateSet(set, ex.weightRequired) != '') set.done = false
+	}
+}
+
+// 云端拒收数据不完整的已完成组。填写中途（例如已完成的组正在改次数）暂时不合法的组，
+// 在上传副本里按未完成处理，避免整场训练同步失败；本机数据保持原样
+function cloudPayload(s : WorkoutSession) : string {
+	const copy = JSON.parse(JSON.stringify(s)) as WorkoutSession
+	for (let i = 0; i < copy.exercises.length; i++) clearInvalidDone(copy.exercises[i])
+	const draft = copy.editing
+	if (draft != null && draft.exercise != null) clearInvalidDone(draft.exercise)
+	return JSON.stringify(copy)
+}
+
 export function saveSession(s : WorkoutSession) : boolean {
 	s.updatedAt = Date.now()
 	s.cloudStatus = 'pending'
@@ -456,7 +473,7 @@ export function saveSession(s : WorkoutSession) : boolean {
 	s.durationSent = false
 	if (!writeJson(SESSION_KEY, s)) return false
 	try {
-		queueCloud('session', s.id, JSON.stringify(s), false, s.cloudRevision ?? 0)
+		queueCloud('session', s.id, cloudPayload(s), false, s.cloudRevision ?? 0)
 		return true
 	} catch (e) {
 		console.error('Session retained locally; sync journal failed', e)
@@ -812,7 +829,7 @@ export function commitEdit(slot : EditSlot) : string {
 	}
 	if (s.cloudStatus == 'pending') {
 		try {
-			queueCloud('session', s.id, JSON.stringify(s), false, s.cloudRevision ?? 0)
+			queueCloud('session', s.id, cloudPayload(s), false, s.cloudRevision ?? 0)
 		} catch (e) {
 			console.error('Edit retained locally; sync journal failed', e)
 		}

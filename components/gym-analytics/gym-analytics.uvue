@@ -142,6 +142,7 @@
 	const muscleCanvasSize = ref<number>(180)
 	const muscleCanvasReady = ref<boolean>(false)
 
+	const rangeLabels = ref<string[]>(RANGE_LABELS)
 	const rangeIndex = computed(() : number => {
 		for (let i = 0; i < RANGE_KEYS.length; i++) if (RANGE_KEYS[i] == rangeKey.value) return i
 		return 1

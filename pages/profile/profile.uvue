@@ -1,6 +1,6 @@
 <template>
 	<view class="app-shell">
-		<scroll-view class="app-content" scroll-y="true">
+		<scroll-view :show-scrollbar="false" class="app-content" scroll-y="true">
 			<gym-profile @edit-nickname="openEditor"></gym-profile>
 		</scroll-view>
 		<gym-nickname-editor v-if="editing" :nickname="current" @close="editing = false" @saved="onSaved"></gym-nickname-editor>

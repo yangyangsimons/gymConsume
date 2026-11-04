@@ -9,12 +9,12 @@
 				</button>
 			</view>
 
-			<scroll-view class="sheet-body" scroll-y="true" v-if="step === 'select'">
+			<scroll-view :show-scrollbar="false" class="sheet-body" scroll-y="true" v-if="step === 'select'">
 				<view class="search-box">
 					<gym-icon name="search-muted-light" :size="19"></gym-icon>
 					<input class="search-input" placeholder="搜索动作名称或拼音" :value="keyword" @input="onSearchInput" />
 				</view>
-				<scroll-view class="category-tabs" scroll-x="true">
+				<scroll-view :show-scrollbar="false" class="category-tabs" scroll-x="true">
 					<button class="category-btn" :class="{ active: category === item }" v-for="item in categories"
 						:key="item" @click="category = item">{{ item }}</button>
 				</scroll-view>
@@ -38,7 +38,7 @@
 				<view class="body-pad"></view>
 			</scroll-view>
 
-			<scroll-view class="sheet-body" scroll-y="true" v-else>
+			<scroll-view :show-scrollbar="false" class="sheet-body" scroll-y="true" :scroll-into-view="scrollTarget" v-else>
 				<view class="exercise-summary">
 					<text class="summary-target">{{ targetLabel }}</text>
 					<view class="summary-row">
@@ -56,7 +56,7 @@
 				</view>
 				<view class="sets-list">
 					<view class="set-card" :class="{ completed: row.done, warmup: row.warm }" v-for="row in rows"
-						:key="row.id">
+						:key="row.id" :id="'set-' + row.id">
 						<view class="set-top">
 							<text class="set-badge">{{ row.badge }}</text>
 							<button class="kind-tag" :class="{ warm: row.warm }" @click="chooseKind(row.id)">{{ row.warm ? '热身' : '正式' }} ▾</button>
@@ -70,12 +70,16 @@
 							<view class="field field-weight">
 								<input class="field-input" type="digit" confirm-type="done" :value="row.weight"
 									:placeholder="weightPlaceholder" placeholder-style="color:#b3bbb6;font-size:15px;font-weight:400"
+									:adjust-position="false" @focus="onFieldFocus(row.id)"
+									@keyboardheightchange="onKeyboardHeightChange"
 									@input="onWeightInput(row.id, $event)" />
 								<text class="field-unit">kg</text>
 							</view>
 							<view class="field field-reps">
 								<input class="field-input" type="number" confirm-type="done" :value="row.reps" placeholder="次数"
 									placeholder-style="color:#b3bbb6;font-size:15px;font-weight:400"
+									:adjust-position="false" @focus="onFieldFocus(row.id)"
+									@keyboardheightchange="onKeyboardHeightChange"
 									@input="onRepsInput(row.id, $event)" />
 								<text class="field-unit">次</text>
 							</view>
@@ -106,10 +110,12 @@
 				<view class="body-pad"></view>
 			</scroll-view>
 
-			<view class="sheet-footer" v-if="step === 'entry'">
+			<view class="sheet-footer" v-if="step === 'entry' && keyboardHeight === 0">
 				<button class="save-workout" @click="onSave">保存动作</button>
 				<view class="safe-bottom"></view>
 			</view>
+			<!-- 输入框关闭了 adjust-position，由面板自身让出键盘高度，避免整页被顶起导致弹层漂移 -->
+			<view class="keyboard-spacer" v-if="keyboardHeight > 0" :style="{ height: keyboardHeight + 'px' }"></view>
 		</view>
 
 		<gym-rir-picker v-if="showRir" :value="rirValue" :set-label="rirSetLabel" @select="onRirSelect"
@@ -121,7 +127,7 @@
 
 <script setup lang="uts">
 	import { Exercise, SetLog, Workout, lastSetsOf } from '@/services/gym-stats.uts'
-	import { loadExercises } from '@/services/gym-api.uts'
+	import { cachedExercises, loadExercises } from '@/services/gym-api.uts'
 	import { loadPreviousWorkouts } from '@/services/gym-days.uts'
 	import {
 		EditingDraft, ExerciseProgress, ExerciseTarget, KIND_WARMUP, KIND_WORK, RIR_UNSET, SetEntry, SessionExercise,
@@ -150,6 +156,13 @@
 	}
 	type InputEvent = {
 		detail : InputEventDetail
+	}
+
+	type KeyboardHeightDetail = {
+		height : number
+	}
+	type KeyboardHeightEvent = {
+		detail : KeyboardHeightDetail
 	}
 
 	const RIR_HELP = '剩余次数 RIR：完成这一组后，你估计还能以相同动作标准再做几次？例如，选择 2，表示大约还能做 2 次。'
@@ -347,12 +360,17 @@
 	})
 
 	onMounted(() => {
+		const cached = cachedExercises()
+		if (cached != null) {
+			exercises.value = cached
+			loadingExercises.value = false
+		}
 		loadExercises().then((list : Exercise[]) => {
 			exercises.value = list
 			loadingExercises.value = false
 		}).catch(() => {
 			loadingExercises.value = false
-			uni.showToast({ title: '动作库加载失败', icon: 'none' })
+			if (cached == null) uni.showToast({ title: '动作库加载失败', icon: 'none' })
 		})
 		loadPreviousWorkouts().then((list : Workout[]) => {
 			history.value = list
@@ -416,6 +434,38 @@
 		s.weight = e.detail.value
 		clearError(id)
 		schedulePersist()
+	}
+
+	const keyboardHeight = ref<number>(0)
+	const scrollTarget = ref<string>('')
+	let focusedSetId = ''
+
+	// scroll-into-view 只在值变化时生效，先清空再设置，保证重复聚焦同一组也能滚动
+	function revealFocusedSet() {
+		if (focusedSetId == '' || keyboardHeight.value <= 0) return
+		const target = 'set-' + focusedSetId
+		scrollTarget.value = ''
+		nextTick(() => {
+			scrollTarget.value = target
+		})
+	}
+
+	function onFieldFocus(id : string) {
+		focusedSetId = id
+		revealFocusedSet()
+	}
+
+	function onKeyboardHeightChange(e : KeyboardHeightEvent) {
+		const h = e.detail.height
+		if (h == keyboardHeight.value) return
+		keyboardHeight.value = h > 0 ? h : 0
+		if (h > 0) {
+			nextTick(() => {
+				revealFocusedSet()
+			})
+		} else {
+			focusedSetId = ''
+		}
 	}
 
 	function onRepsInput(id : string, e : InputEvent) {
@@ -576,13 +626,8 @@
 			return
 		}
 		closed = true
-		try {
-			await flushCloud()
-			uni.showToast({ title: '已保存', icon: 'none' })
-		} catch (e) {
-			console.error('Action saved locally; cloud retry required', e)
-			uni.showToast({ title: '已保存到本机，云端同步待重试', icon: 'none' })
-		}
+		uni.showToast({ title: '已保存到本机', icon: 'none' })
+		flushCloud().catch((e : unknown) => console.error('Action saved locally; automatic cloud retry pending', e))
 		emit('saved')
 	}
 
@@ -1220,5 +1265,9 @@
 
 	.safe-bottom {
 		height: env(safe-area-inset-bottom);
+	}
+
+	.keyboard-spacer {
+		flex-shrink: 0;
 	}
 </style>

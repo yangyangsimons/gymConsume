@@ -1,6 +1,6 @@
 <template>
 	<view class="ov-page">
-		<scroll-view class="ov-scroll" scroll-y="true">
+		<scroll-view :show-scrollbar="false" class="ov-scroll" scroll-y="true">
 			<view class="ov-missing" v-if="session == null">
 				<text class="ov-missing-title">没有找到这场训练</text>
 				<text class="ov-missing-text">它可能已经结束或被清除。这里不会自动创建新的训练，请回到首页开始今天的训练。</text>
@@ -95,6 +95,7 @@
 	} from '@/services/workout-session.uts'
 	import { syncSessionToCloud } from '@/services/workout-adapter.uts'
 	import { confirmDialog } from '@/services/gym-dialog.uts'
+	import { cachedExercises, loadExercises } from '@/services/gym-api.uts'
 
 	type ExerciseCard = {
 		index : number
@@ -128,6 +129,8 @@
 		uni.$on('cloud-sync-changed', reload)
 		// 编辑记录保存后返回本页时刷新
 		uni.$on('workout-saved', reload)
+		// 预热动作库，打开“添加动作”时无需等待
+		if (cachedExercises() == null) loadExercises().catch((e : unknown) => { console.error('Exercise library prefetch failed', e) })
 	})
 	onUnmounted(() => {
 		uni.$off('cloud-sync-changed', reload)

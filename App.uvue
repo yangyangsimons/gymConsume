@@ -1,5 +1,5 @@
 <script setup lang="uts">
-	import { flushCloud, refreshCloudData } from '@/services/gym-cloud.uts'
+	import { flushCloud, pauseCloudSync, resumeCloudSync } from '@/services/gym-cloud.uts'
 	// #ifdef APP-ANDROID || APP-HARMONY
 	let firstBackTime = 0
 	// #endif
@@ -16,16 +16,20 @@
       traceUser: true
     })
 		console.log('Cloud initialized')
-		refreshCloudData().catch((e : unknown) => console.error('Initial cloud load failed', e))
+		wx.onNetworkStatusChange((status) => {
+			if (status.isConnected) resumeCloudSync(true).catch((e : unknown) => console.error('Network recovery sync failed', e))
+		})
+		resumeCloudSync().catch((e : unknown) => console.error('Initial cloud load failed', e))
 	})
 
 	onAppShow(() => {
 		console.log('App Show')
-		refreshCloudData().catch((e : unknown) => console.error('Foreground cloud load failed', e))
+		resumeCloudSync().catch((e : unknown) => console.error('Foreground cloud load failed', e))
 	})
 
 	onAppHide(() => {
 		console.log('App Hide')
+		pauseCloudSync()
 		flushCloud().catch((e : unknown) => console.error('Background sync retained locally', e))
 	})
 
@@ -62,4 +66,15 @@
 	.uni-column {
 		flex-direction: column;
 	}
+
+	/* #ifdef MP-WEIXIN */
+	/* 隐藏页面级滚动和 scroll-view 的滚动条（scroll-view 另需 show-scrollbar=false） */
+	::-webkit-scrollbar {
+		display: none;
+		width: 0;
+		height: 0;
+		color: transparent;
+		background: transparent;
+	}
+	/* #endif */
 </style>

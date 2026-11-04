@@ -1,6 +1,6 @@
 <template>
 	<view class="app-shell">
-		<scroll-view class="app-content" scroll-y="true">
+		<scroll-view :show-scrollbar="false" class="app-content" scroll-y="true">
 			<view class="page-header">
 				<text class="eyebrow">动作库</text>
 				<text class="heading-1">全部动作</text>

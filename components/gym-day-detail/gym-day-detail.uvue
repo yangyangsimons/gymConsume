@@ -1,6 +1,6 @@
 <template>
 	<view class="dd-page">
-		<scroll-view class="dd-scroll" scroll-y="true">
+		<scroll-view :show-scrollbar="false" class="dd-scroll" scroll-y="true">
 			<view class="dd-content">
 				<view class="dd-head">
 					<text class="dd-kicker">WORKOUT DETAIL</text>
